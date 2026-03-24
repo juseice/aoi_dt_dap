@@ -8,6 +8,7 @@ from utils.visualization import plot_simulation_results
 
 from environment.rl_env import DTEngineEnv
 from main import setup_clean_environment  # 暂用建图
+from utils.data_generator import load_dataset
 
 
 def train_and_evaluate_ppo():
@@ -16,10 +17,15 @@ def train_and_evaluate_ppo():
     logger.info("=" * 50)
 
     # 1. 准备物理网络环境
-    net, users, task_chains = setup_clean_environment()
+    # net, users, task_chains = setup_clean_environment()
+    dataset = load_dataset("../data/dataset_small.pkl")
+    net = dataset['network']
+    users = dataset['users']
+    task_chains = dataset['task_chains']
 
-    # 训练时的请求序列可以长一点，比如每个回合 100 个请求
-    TRAIN_REQS_PER_EPISODE = 100
+
+    # 训练时的请求序列可以长一点
+    TRAIN_REQS_PER_EPISODE = 200
 
     # 为了让 SB3 运行更稳，我们用一个 lambda 函数来实例化你的 Env
     env_maker = lambda: DTEngineEnv(
@@ -43,9 +49,7 @@ def train_and_evaluate_ppo():
     logger.info("2：试错学习")
     logger.info("=" * 50)
 
-    # 开始训练！让它跑 20,000 步 (20000 / 100 = 200 个游戏回合)
-    # 在你的笔记本上大概只需要十几秒钟
-    TOTAL_TIMESTEPS = 20000
+    TOTAL_TIMESTEPS = 50000
     model.learn(total_timesteps=TOTAL_TIMESTEPS)
 
     # 保存训练好的大脑权重
@@ -59,7 +63,11 @@ def train_and_evaluate_ppo():
 
     # 评估时，我们需要用一个【固定 Seed】的干净环境，以保证公平性
     EVAL_REQS = 30
-    eval_net, eval_users, eval_task_chains = setup_clean_environment()
+    # eval_net, eval_users, eval_task_chains = setup_clean_environment()
+    dataset = load_dataset("../data/dataset_small.pkl")
+    eval_net = dataset['network']
+    eval_users = dataset['users']
+    eval_task_chains = dataset['task_chains']
     eval_env = DTEngineEnv(
         network=eval_net,
         users=eval_users,

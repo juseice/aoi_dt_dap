@@ -28,7 +28,7 @@ from environment.event import generate_poisson_requests
 from environment.rl_env import DTEngineEnv
 from stable_baselines3 import PPO
 from environment.rl_env import DTEngineEnv
-import random
+from utils.data_generator import load_dataset
 
 
 def setup_clean_environment():
@@ -90,16 +90,21 @@ def run_evaluation(algo_name, solver_func, total_reqs=15, seed=42):
 
     # 1. 重置物理世界
     logger.info("初始化网络拓扑...")
-    net, users, task_chains = setup_clean_environment()
+    # net, users, task_chains = setup_clean_environment()
+    # 2. 生成固定的事件流 (只要 seed 相同，请求的时间、用户、任务完全一致)
+    # request_stream = generate_poisson_requests(
+    #     users=users, task_chains=task_chains,
+    #     arrival_rate=0.5, total_requests=total_reqs, seed=seed
+    # )
+    dataset = load_dataset("data/dataset_small.pkl")
+
+    net = dataset['network']
+    users = dataset['users']
+    task_chains = dataset['task_chains']
+    request_stream = dataset['request_stream']
 
     # plot_network_topology(net)  # 如果你想看图，可以把这行取消注释
-    sim = Simulator(net, dt_ttl=25.0)
-
-    # 2. 生成固定的事件流 (只要 seed 相同，请求的时间、用户、任务完全一致)
-    request_stream = generate_poisson_requests(
-        users=users, task_chains=task_chains,
-        arrival_rate=0.5, total_requests=total_reqs, seed=seed
-    )
+    sim = Simulator(net, dt_ttl=10.0)
 
     alpha, beta = 1.0, 1.0
     history = []
@@ -115,6 +120,9 @@ def run_evaluation(algo_name, solver_func, total_reqs=15, seed=42):
         else:
             # 先拿到理想路线图
             dp_plan = solve_dp_offline(net, request_stream, alpha, beta)
+            if not dp_plan:
+                logger.error("DP 求解失败返回空计划，DP Real 无法执行！")
+                return []
 
             for i, req in enumerate(request_stream):
                 sim.cleanup_expired_dts(req.time)
@@ -152,10 +160,10 @@ def run_evaluation(algo_name, solver_func, total_reqs=15, seed=42):
             return []
 
         # 实例化环境 (一定要用和环境同样的 seed，保证考卷一样)
-        env = DTEngineEnv(net, users, task_chains, total_reqs=total_reqs, seed=seed)
+        env = DTEngineEnv(net, users, task_chains, total_reqs=len(request_stream), seed=seed)
         obs, _ = env.reset()
 
-        for step in range(total_reqs):
+        for req in request_stream:
             # deterministic=True 表示取消探索，每次都严格选最优动作
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
@@ -206,7 +214,7 @@ def run_evaluation(algo_name, solver_func, total_reqs=15, seed=42):
 
 def test_rl_environment():
     logger.info("\n========== 测试强化学习环境接口 ==========")
-    net, users, task_chains = setup_clean_environment()  # 借用你之前的建图函数
+    net, users, task_chains = setup_clean_environment()  # 之前的建图函数
 
     # 实例化环境
     env = DTEngineEnv(net, users, task_chains, total_reqs=10, seed=42)
@@ -288,7 +296,7 @@ def main():
     logger.info("\n仿真结束，正在生成对比可视化报表...")
     plot_comparative_results(all_histories)
 
-    test_rl_environment()
+    # test_rl_environment()
 
 if __name__ == "__main__":
     main()

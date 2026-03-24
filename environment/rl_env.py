@@ -48,11 +48,51 @@ class DTEngineEnv(gym.Env):
         # 假设我们提取的特征长度为：
         # 1 (用户ID) + 1 (传感器ID) + 1 (该DT上次部署节点) + 1 (上次的AoI) + num_nodes (各节点可用内存)
         # 2. 状态空间维度精准计算
-        # U_t (One-Hot) + S_t (One-Hot) + H_{t-1} (One-Hot) + M_t (归一化内存) + Delta_{t-1} (归一化AoI)
-        self.obs_dim = self.num_users + self.num_sensors + self.num_nodes + self.num_nodes + 1
+        # U_t (One-Hot) + S_t (One-Hot) + H_{t-1} (One-Hot) + M_t (归一化内存) + Delta_{t-1} (归一化AoI) + s_to_n + n_to_u
+        self.obs_dim = self.num_users + self.num_sensors + self.num_nodes + self.num_nodes + 1 + self.num_nodes + self.num_nodes
 
         # 所有的状态值都被严格限制在 0.0 到 1.0 之间 (极其利于神经网络收敛)
         self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(self.obs_dim,), dtype=np.float32)
+
+        # RL Reward Hyperparameters (对应公式 7)
+        self.alpha = 1.0
+        self.beta = 1.0
+        self.Z = 20.0  # 缩放系数 Z
+        self.R_finish = 10.0  # 成功完成任务的固定基础奖励
+        self.R_penalty = -5.0  # 违反物理约束的惩罚 (比之前的 -100 温和，防止网络过度害怕)
+
+        # 预先提取网络中的全局最强属性，用于计算公式(8)的理论极限
+        self.max_compute = max([n.compute_power for n in self.edge_nodes])
+        self.min_cost = min([n.cost for n in self.edge_nodes])
+
+        # 获取全网最大带宽
+        all_edges = []
+        for u, v, data in self.network.graph.edges(data=True):
+            all_edges.append(data['edge'].bandwidth)
+        self.max_bandwidth = max(all_edges) if all_edges else 10.0
+
+    def _compute_lower_bound(self, req):
+        """
+        计算公式 (8): LB_j (理论最低时延与成本)
+        假设没有排队、没有迁移开销，且全都走最大带宽、最强算力节点。
+        """
+        task_chain = req.task_chain
+        total_workload = sum(task.workload for task in task_chain.tasks)
+
+        # 1. 理论最小计算时间 = 总计算量 / 全网最强节点算力
+        min_comp_time = total_workload / self.max_compute
+
+        # 2. 理论最低运行成本 = 全网最便宜节点的单价 * 最小计算时间
+        min_run_cost = self.min_cost * min_comp_time
+
+        # 3. 理论最小传输时间 (简化估算) = (上行数据量 + 下行结果) / 全网最大带宽
+        sensor_data_size = self.network.get_node(task_chain.sensor_id).data_size
+        result_size = 1.0
+        min_trans_time = (sensor_data_size + result_size) / self.max_bandwidth
+
+        # LB_j = alpha * Cost_min + beta * AoI_min (假设 0 排队时延)
+        lb_j = self.alpha * min_run_cost + self.beta * (min_comp_time + min_trans_time)
+        return lb_j
 
     def _get_obs(self, req):
         """
@@ -90,8 +130,24 @@ class DTEngineEnv(gym.Env):
         aoi_norm = np.clip(last_aoi / MAX_AOI_SCALE, 0.0, 1.0)
         aoi_vec = np.array([aoi_norm], dtype=np.float32)
 
+        s_to_n_dist = np.zeros(self.num_nodes, dtype=np.float32)
+        n_to_u_dist = np.zeros(self.num_nodes, dtype=np.float32)
+        sensor_id = req.task_chain.sensor_id
+        user_id = req.user.id
+        for i, node in enumerate(self.edge_nodes):
+            # 找传感器到节点的路径长度 (这里简单用跳数 len(path) 估算，如果不可达给个大数值)
+            path_up = self.network.get_path(sensor_id, node.id, 1.0)
+            s_to_n_dist[i] = len(path_up) if path_up else 10.0
+
+            # 找节点到用户的路径长度
+            path_down = self.network.get_path(node.id, user_id, 1.0)
+            n_to_u_dist[i] = len(path_down) if path_down else 10.0
+
+        s_to_n_dist = np.clip(s_to_n_dist / 10.0, 0.0, 1.0)
+        n_to_u_dist = np.clip(n_to_u_dist / 10.0, 0.0, 1.0)
+
         # 将所有特征拼接成一个扁平的一维数组
-        obs = np.concatenate([u_vec, s_vec, h_vec, m_vec, aoi_vec])
+        obs = np.concatenate([u_vec, s_vec, h_vec, m_vec, aoi_vec, s_to_n_dist, n_to_u_dist])
         return obs
 
     def reset(self, seed=None, options=None):
@@ -139,15 +195,35 @@ class DTEngineEnv(gym.Env):
             aoi = estimate_aoi(real_sense, real_queue, real_comp, real_res)
             cost = compute_cost(target_node, real_comp, req.task_chain, real_mig)
 
-            # RL 是追求最大化 Reward，所以我们取负数
-            alpha, beta = 1.0, 1.0
-            reward = - (alpha * cost + beta * aoi)
+            # Reward
+            lb_j = self._compute_lower_bound(req)
+            actual_obj = self.alpha * cost + self.beta * aoi
+
+            # 分母保护，防止除以 0 导致溢出
+            actual_obj = max(actual_obj, 1e-5)
+
+            # rt = Z * LB / (alpha*C + beta*D) + R_finish
+            reward = (self.Z * lb_j) / actual_obj + self.R_finish
 
         except RuntimeError as e:
             # 【约束惩罚】：如果智能体选了一个内存不够的节点，物理机崩溃
             # 给予极大的负惩罚，并可以选择提前结束这一回合
-            reward = -100.0
+            reward = self.R_penalty
             aoi, cost = float('inf'), float('inf')
+            real_sense, real_queue, real_comp, real_res, real_mig = \
+                float('inf'), float('inf'), float('inf'), float('inf'), float('inf')
+            # 保证状态流转
+            fallback_node = None
+            for n in self.edge_nodes:
+                if n.available_memory >= sum(t.memory_requirement for t in req.task_chain.tasks):
+                    fallback_node = n
+                    break
+            if fallback_node:
+                # 推进时间轴
+                self.simulator.commit_step(fallback_node, req.task_chain, req.user, req.time)
+            else:
+                # terminated = True
+                pass
 
         # 3. 推进时间，获取下一个请求
         self.current_step += 1

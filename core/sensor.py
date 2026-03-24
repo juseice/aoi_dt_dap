@@ -2,7 +2,7 @@ from core.node import Node
 
 
 class Sensor(Node):
-    def __init__(self, id, data_size, period):
+    def __init__(self, id, data_size, period=1.0):
         super().__init__(id)
         self.data_size = data_size
         self.period = period
