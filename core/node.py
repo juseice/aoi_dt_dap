@@ -16,6 +16,7 @@ class EdgeNode(Node):
         self.compute_power = compute_power
         self.cost = cost
         self.available_time = 0
+        self.memory = memory
         self.available_memory = memory
 
     def test_function(self):

@@ -26,11 +26,13 @@ from utils.logger import logger
 from utils.visualization import plot_network_topology, plot_simulation_results, plot_comparative_results
 from environment.event import generate_poisson_requests
 from environment.rl_env import DTEngineEnv
+from stable_baselines3 import PPO
+from environment.rl_env import DTEngineEnv
 import random
 
 
 def setup_clean_environment():
-    """创建一个全新、干净的网络环境和实体"""
+    """创建一个全新的样例"""
     net = Network()
 
     # Nodes
@@ -141,7 +143,36 @@ def run_evaluation(algo_name, solver_func, total_reqs=15, seed=42):
 
             return history
 
+    if "PPO" in algo_name:
+        try:
+            # 加载你刚才训练好的大脑
+            model = PPO.load("environment/models/ppo_dt_deployment")
+        except FileNotFoundError:
+            logger.error("找不到 PPO 模型文件！请先运行 train_ppo.py")
+            return []
 
+        # 实例化环境 (一定要用和环境同样的 seed，保证考卷一样)
+        env = DTEngineEnv(net, users, task_chains, total_reqs=total_reqs, seed=seed)
+        obs, _ = env.reset()
+
+        for step in range(total_reqs):
+            # deterministic=True 表示取消探索，每次都严格选最优动作
+            action, _ = model.predict(obs, deterministic=True)
+            obs, reward, terminated, truncated, info = env.step(action)
+
+            history.append({
+                'req': info['req_id'],
+                'aoi': info['aoi'],
+                'cost': info['cost'],
+                'migrated': info.get('migrated', False)
+            })
+            logger.info(
+                f"[请求 {info['req_id']}] PPO 部署 Node {action} | 排队(含)=0.0, AoI={info['aoi']:.2f}, Cost={info['cost']:.2f}")
+
+            if terminated:
+                break
+
+        return history
 
     # 3. 开始仿真循环
     for req in request_stream:
@@ -238,12 +269,20 @@ def main():
         COMMON_SEED
     )
 
+    history_ppo = run_evaluation(
+        "PPO (DRL)",
+        None,
+        TOTAL_REQUESTS,
+        COMMON_SEED
+    )
+
     # 3. 合并数据
     all_histories = {
         'Random Baseline': history_random,
         'Greedy Best': history_best,
         'DP Ideal': history_dp,
-        'DP Real': history_dp_real
+        'DP Real': history_dp_real,
+        'PPO (DRL)': history_ppo
     }
 
     logger.info("\n仿真结束，正在生成对比可视化报表...")

@@ -18,6 +18,7 @@ class Simulator:
         self.dt_placements = {}
         # 格式: { task_chain.id: last_request_time }
         self.dt_last_access = {}
+        self.dt_history_aoi = {}
 
     def cleanup_expired_dts(self, current_time):
         """
@@ -122,5 +123,7 @@ class Simulator:
         # 改变系统状态
         self.dt_last_access[task_chain.id] = request_time
         self.node_available_time[node.id] = finish_time
+        real_aoi = sense_delay + queue_delay + compute_time + response_delay
+        self.dt_history_aoi[task_chain.id] = real_aoi
 
         return sense_delay, queue_delay, compute_time, response_delay, is_migrated

@@ -27,6 +27,13 @@ class DTEngineEnv(gym.Env):
         self.edge_nodes = self.network.get_edge_nodes()
         self.num_nodes = len(self.edge_nodes)
 
+        # 提取实体列表用于 One-Hot 编码索引
+        self.user_ids = [u.id for u in self.users]
+        self.sensor_ids = list(set([tc.sensor_id for tc in self.task_chains]))
+
+        self.num_users = len(self.user_ids)
+        self.num_sensors = len(self.sensor_ids)
+
         # ----------------------------------------
         # 1. 定义动作空间 (Action Space)
         # ----------------------------------------
@@ -40,47 +47,63 @@ class DTEngineEnv(gym.Env):
         # 为了让神经网络好收敛，我们需要把所有信息展平成一维数组 (Box)
         # 假设我们提取的特征长度为：
         # 1 (用户ID) + 1 (传感器ID) + 1 (该DT上次部署节点) + 1 (上次的AoI) + num_nodes (各节点可用内存)
-        obs_dim = 4 + self.num_nodes
+        # 2. 状态空间维度精准计算
+        # U_t (One-Hot) + S_t (One-Hot) + H_{t-1} (One-Hot) + M_t (归一化内存) + Delta_{t-1} (归一化AoI)
+        self.obs_dim = self.num_users + self.num_sensors + self.num_nodes + self.num_nodes + 1
 
-        # 定义状态向量的上下界 (通常归一化到 0~1 或用一个足够大的范围)
-        self.observation_space = spaces.Box(low=-1.0, high=100.0, shape=(obs_dim,), dtype=np.float32)
+        # 所有的状态值都被严格限制在 0.0 到 1.0 之间 (极其利于神经网络收敛)
+        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(self.obs_dim,), dtype=np.float32)
 
     def _get_obs(self, req):
         """
-        【核心映射】：将物理世界的字典和对象，翻译成神经网络能看懂的 Float 数组
+        将物理世界的字典和对象，翻译成神经网络能看懂的 Float 数组
         """
         # 1. U_t: 当前请求的用户特征
-        u_feat = req.user.id
+        u_vec = np.zeros(self.num_users, dtype=np.float32)
+        u_vec[self.user_ids.index(req.user.id)] = 1.0
 
-        # 2. 当前请求的 DT 关联的传感器特征
-        s_feat = req.task_chain.sensor_id
+        # 2. S_t: 传感器 ID 独热编码 (One-Hot)
+        s_vec = np.zeros(self.num_sensors, dtype=np.float32)
+        s_vec[self.sensor_ids.index(req.task_chain.sensor_id)] = 1.0
 
         # 3. H_t-1: 该 DT 实例上一次部署在哪里？
+        h_vec = np.zeros(self.num_nodes, dtype=np.float32)
         prev_info = self.simulator.dt_placements.get(req.task_chain.id)
-        h_prev = prev_info['node_id'] if prev_info else -1  # -1 表示从未部署过
+        if prev_info is not None:
+            # 找到对应的节点索引置为 1 (如果从未部署过，则全为 0)
+            prev_node_id = prev_info['node_id']
+            node_idx = [n.id for n in self.edge_nodes].index(prev_node_id)
+            h_vec[node_idx] = 1.0
 
-        # 4. Delta_t-1: 该 DT 上一次的历史 AoI (这里我们简单用 Simulator 里记录的时间差代替，或者先传 0)
-        # 真实工程中可以在 Simulator 维护一个 dt_history_aoi 字典
-        last_aoi = 0.0
+        # 4. M_t: 各节点可用内存归一化 (当前内存 / 最大内存)
+        # 假设 node.memory 存的是容量上限，available_memory 是当前值
+        m_vec = np.zeros(self.num_nodes, dtype=np.float32)
+        for i, node in enumerate(self.edge_nodes):
+            # 防止除以 0，加入 clip 保障
+            ratio = node.available_memory / max(node.memory, 1e-5)
+            m_vec[i] = np.clip(ratio, 0.0, 1.0)
 
-        # 5. M_t: 当前所有边缘节点的可用内存百分比或绝对值
-        m_feat = [node.available_memory for node in self.edge_nodes]
+        # 5. Delta_{t-1}: 上一次的 AoI 归一化
+        last_aoi = self.simulator.dt_history_aoi.get(req.task_chain.id, 0.0)
+        # 设定一个经验最大 AoI 用于缩放 (比如 10 秒)，超过 10 秒的都视为 1.0
+        MAX_AOI_SCALE = 10.0
+        aoi_norm = np.clip(last_aoi / MAX_AOI_SCALE, 0.0, 1.0)
+        aoi_vec = np.array([aoi_norm], dtype=np.float32)
 
-        # 拼接成 Numpy 数组
-        obs = np.array([u_feat, s_feat, h_prev, last_aoi] + m_feat, dtype=np.float32)
+        # 将所有特征拼接成一个扁平的一维数组
+        obs = np.concatenate([u_vec, s_vec, h_vec, m_vec, aoi_vec])
         return obs
 
     def reset(self, seed=None, options=None):
         """
         环境重置：每跑完一轮 (Episode) 都会调用。
-        类似于打游戏死掉后重新开局。
         """
         super().reset(seed=seed)
 
-        # 1. 重置物理模拟器和网络节点内存等状态
+        # 重置物理机内存 (假设 node.memory 是我们设定的最大容量属性)
         for node in self.edge_nodes:
-            # TODO: 你可以根据初始配置还原节点内存，这里假设初始满血是 10G
-            pass
+            node.available_memory = getattr(node, 'memory', 10.0)
+
         self.simulator = Simulator(self.network, dt_ttl=10.0)
 
         # 2. 生成新一轮的泊松请求流
@@ -100,7 +123,6 @@ class DTEngineEnv(gym.Env):
         步进函数：RL 智能体给出一个 action，环境执行并返回 reward 和下一个状态
         """
         req = self.current_req
-
         # 1. 将网络输出的整数 (0, 1, 2) 映射回真实的物理节点对象
         target_node = self.edge_nodes[action]
 
@@ -117,7 +139,6 @@ class DTEngineEnv(gym.Env):
             aoi = estimate_aoi(real_sense, real_queue, real_comp, real_res)
             cost = compute_cost(target_node, real_comp, req.task_chain, real_mig)
 
-            # 【设计 Reward】：论文里要最小化 (alpha*Cost + beta*AoI)
             # RL 是追求最大化 Reward，所以我们取负数
             alpha, beta = 1.0, 1.0
             reward = - (alpha * cost + beta * aoi)
@@ -130,7 +151,6 @@ class DTEngineEnv(gym.Env):
 
         # 3. 推进时间，获取下一个请求
         self.current_step += 1
-
         # 检查这一个 Episode (回合) 是否跑完了
         terminated = self.current_step >= self.total_reqs
         truncated = False  # 用于超时截断，这里不用
@@ -143,7 +163,5 @@ class DTEngineEnv(gym.Env):
             next_obs = self._get_obs(req)
 
         # 用于记录画图的详细信息
-        info = {'req_id': req.id, 'aoi': aoi, 'cost': cost}
-
+        info = {'req_id': req.id, 'aoi': aoi, 'cost': cost, 'migrated': bool(real_mig)}
         return next_obs, reward, terminated, truncated, info
-    

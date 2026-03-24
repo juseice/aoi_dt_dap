@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# PyCharm
+.idea/
+
+# virtual environment
+venv/
+.env/
+
+# datasets
+data/
+dataset/
+datasets/
+
+# models
+models/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.h5
+
+# numpy
+*.npy
+*.npz
+
+# logs
+logs/
+*.log
+
+# cache
+.cache/
