@@ -2,6 +2,7 @@
 import logging
 import os
 
+
 def setup_logger(log_filename="simulation.log", level=logging.INFO):
     """
     初始化全局日志记录器
@@ -32,6 +33,7 @@ def setup_logger(log_filename="simulation.log", level=logging.INFO):
         logger.addHandler(file_handler)
 
     return logger
+
 
 # 导出一个全局可用的 logger 实例
 logger = setup_logger()

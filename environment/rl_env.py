@@ -11,10 +11,10 @@ from environment.simulator import Simulator
 
 class DTEngineEnv(gym.Env):
     """
-    边缘网络数字孪生部署的 RL 环境 (符合 Gymnasium 标准API)
+    边缘网络数字孪生部署的 RL 环境
     """
 
-    def __init__(self, network, users, task_chains, total_reqs=50, seed=42):
+    def __init__(self, network, users, task_chains, request_stream=None, total_reqs=50, seed=42):
         super(DTEngineEnv, self).__init__()
 
         self.network = network
@@ -22,6 +22,14 @@ class DTEngineEnv(gym.Env):
         self.task_chains = task_chains
         self.total_reqs = total_reqs
         self.seed = seed
+
+        self.fixed_request_stream = request_stream
+        if self.fixed_request_stream is not None:
+            self.request_stream = self.fixed_request_stream
+            self.total_reqs = len(self.request_stream)
+        else:
+            self.request_stream = None
+            self.total_reqs = total_reqs
 
         # 提取所有的边缘节点 (动作空间的备选项)
         self.edge_nodes = self.network.get_edge_nodes()
@@ -108,28 +116,25 @@ class DTEngineEnv(gym.Env):
 
         # 3. H_t-1: 该 DT 实例上一次部署在哪里？
         h_vec = np.zeros(self.num_nodes, dtype=np.float32)
-        prev_info = self.simulator.dt_placements.get(req.task_chain.id)
-        if prev_info is not None:
-            # 找到对应的节点索引置为 1 (如果从未部署过，则全为 0)
-            prev_node_id = prev_info['node_id']
+        prev_node_id = self.simulator.get_dt_placement(req.task_chain.id)
+        if prev_node_id is not None:
             node_idx = [n.id for n in self.edge_nodes].index(prev_node_id)
             h_vec[node_idx] = 1.0
 
         # 4. M_t: 各节点可用内存归一化 (当前内存 / 最大内存)
-        # 假设 node.memory 存的是容量上限，available_memory 是当前值
+        # node.memory 存的是容量上限，available_memory 是当前值
         m_vec = np.zeros(self.num_nodes, dtype=np.float32)
         for i, node in enumerate(self.edge_nodes):
-            # 防止除以 0，加入 clip 保障
-            ratio = node.available_memory / max(node.memory, 1e-5)
+            avail_mem = self.simulator.get_node_available_memory(node.id)
+            ratio = avail_mem / max(node.memory, 1e-5)
             m_vec[i] = np.clip(ratio, 0.0, 1.0)
 
         # 5. Delta_{t-1}: 上一次的 AoI 归一化
-        last_aoi = self.simulator.dt_history_aoi.get(req.task_chain.id, 0.0)
-        # 设定一个经验最大 AoI 用于缩放 (比如 10 秒)，超过 10 秒的都视为 1.0
+        last_aoi = self.simulator.get_dt_last_aoi(req.task_chain.id)
         MAX_AOI_SCALE = 10.0
-        aoi_norm = np.clip(last_aoi / MAX_AOI_SCALE, 0.0, 1.0)
-        aoi_vec = np.array([aoi_norm], dtype=np.float32)
+        aoi_vec = np.array([np.clip(last_aoi / MAX_AOI_SCALE, 0.0, 1.0)], dtype=np.float32)
 
+        # 6. 拓扑距离感知
         s_to_n_dist = np.zeros(self.num_nodes, dtype=np.float32)
         n_to_u_dist = np.zeros(self.num_nodes, dtype=np.float32)
         sensor_id = req.task_chain.sensor_id
@@ -156,23 +161,22 @@ class DTEngineEnv(gym.Env):
         """
         super().reset(seed=seed)
 
-        # 重置物理机内存 (假设 node.memory 是我们设定的最大容量属性)
+        # 重置物理机内存
         for node in self.edge_nodes:
             node.available_memory = getattr(node, 'memory', 10.0)
 
         self.simulator = Simulator(self.network, dt_ttl=10.0)
-
-        # 2. 生成新一轮的泊松请求流
-        self.request_stream = generate_poisson_requests(
-            self.users, self.task_chains, arrival_rate=0.5, total_requests=self.total_reqs, seed=seed
-        )
+        if self.fixed_request_stream is not None:
+            self.request_stream = self.fixed_request_stream
+        else:
+            self.request_stream = generate_poisson_requests(
+                self.users, self.task_chains, arrival_rate=0.5, total_requests=self.total_reqs, seed=seed
+            )
 
         self.current_step = 0
         self.current_req = self.request_stream[self.current_step]
 
-        # 3. 返回第一个状态 (Observation) 和空的 Info 字典
-        obs = self._get_obs(self.current_req)
-        return obs, {}
+        return self._get_obs(self.current_req), {}
 
     def step(self, action):
         """
@@ -183,12 +187,12 @@ class DTEngineEnv(gym.Env):
         target_node = self.edge_nodes[action]
 
         # 先执行垃圾回收推演时间
-        self.simulator.cleanup_expired_dts(req.time)
+        self.simulator.cleanup_expired_dts(req.trigger_time)
 
         # 2. 在物理引擎中真实执行！
         try:
             real_sense, real_queue, real_comp, real_res, real_mig = self.simulator.commit_step(
-                target_node, req.task_chain, req.user, req.time
+                target_node, req.task_chain, req.user, req.trigger_time
             )
 
             # 计算真实指标
@@ -197,33 +201,36 @@ class DTEngineEnv(gym.Env):
 
             # Reward
             lb_j = self._compute_lower_bound(req)
-            actual_obj = self.alpha * cost + self.beta * aoi
-
-            # 分母保护，防止除以 0 导致溢出
-            actual_obj = max(actual_obj, 1e-5)
+            actual_obj = max(self.alpha * cost + self.beta * aoi, 1e-5)
 
             # rt = Z * LB / (alpha*C + beta*D) + R_finish
             reward = (self.Z * lb_j) / actual_obj + self.R_finish
+            success = True
 
         except RuntimeError as e:
             # 【约束惩罚】：如果智能体选了一个内存不够的节点，物理机崩溃
             # 给予极大的负惩罚，并可以选择提前结束这一回合
+            # reward = self.R_penalty
+            # aoi, cost = float('inf'), float('inf')
+            # real_sense, real_queue, real_comp, real_res, real_mig = \
+            #     float('inf'), float('inf'), float('inf'), float('inf'), float('inf')
+            # # 保证状态流转
+            # fallback_node = None
+            # for n in self.edge_nodes:
+            #     if n.available_memory >= sum(t.memory_requirement for t in req.task_chain.tasks):
+            #         fallback_node = n
+            #         break
+            # if fallback_node:
+            #     # 推进时间轴
+            #     self.simulator.commit_step(fallback_node, req.task_chain, req.user, req.time)
+            # else:
+            #     # terminated = True
+            #     pass
             reward = self.R_penalty
             aoi, cost = float('inf'), float('inf')
-            real_sense, real_queue, real_comp, real_res, real_mig = \
-                float('inf'), float('inf'), float('inf'), float('inf'), float('inf')
-            # 保证状态流转
-            fallback_node = None
-            for n in self.edge_nodes:
-                if n.available_memory >= sum(t.memory_requirement for t in req.task_chain.tasks):
-                    fallback_node = n
-                    break
-            if fallback_node:
-                # 推进时间轴
-                self.simulator.commit_step(fallback_node, req.task_chain, req.user, req.time)
-            else:
-                # terminated = True
-                pass
+            real_mig = False
+            success = False
+            # 此时我们不再寻找 fallback_node，物理时间会在下一个请求到来时自然推进
 
         # 3. 推进时间，获取下一个请求
         self.current_step += 1
@@ -235,9 +242,15 @@ class DTEngineEnv(gym.Env):
             self.current_req = self.request_stream[self.current_step]
             next_obs = self._get_obs(self.current_req)
         else:
-            # 如果结束了，返回当前观测即可
+            # 保持张量形状，返回当前观测即可
             next_obs = self._get_obs(req)
 
         # 用于记录画图的详细信息
-        info = {'req_id': req.id, 'aoi': aoi, 'cost': cost, 'migrated': bool(real_mig)}
+        info = {
+            'req_id': req.id,
+            'aoi': aoi,
+            'cost': cost,
+            'migrated': bool(real_mig),
+            'success': success  # 用于记录这步是否被 Drop
+        }
         return next_obs, reward, terminated, truncated, info

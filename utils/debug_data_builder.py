@@ -102,11 +102,11 @@ def build_debug_dataset():
         'users': [u_0, u_1],
         'task_chains': [dt_0, dt_1],
         'request_stream': request_stream,
-        'config': {'num_edge_nodes': 3, 'total_requests': 5, 'seed': 'debug'}
+        'config': {'num_edge_nodes': 3, 'total_requests': 5, 'seed': 42}
     }
 
     os.makedirs("data", exist_ok=True)
-    filename = "data/dataset_debug.pkl"
+    filename = "../data/dataset_debug.pkl"
     with open(filename, 'wb') as f:
         pickle.dump(dataset, f)
     logger.info(f"Debug 数据集已生成至 {filename}")

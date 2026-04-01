@@ -20,6 +20,23 @@ class Simulator:
         self.dt_last_access = {}
         self.dt_history_aoi = {}
 
+    # ==========================================
+    # 对外提供状态查询接口 (解耦的核心)
+    # ==========================================
+    def get_dt_placement(self, task_chain_id):
+        """查询 DT 当前部署在哪个节点 ID 上，若未部署返回 None"""
+        info = self.dt_placements.get(task_chain_id)
+        return info['node_id'] if info else None
+
+    def get_dt_last_aoi(self, task_chain_id):
+        """查询 DT 上一次访问的真实 AoI，若无记录返回 0.0"""
+        return self.dt_history_aoi.get(task_chain_id, 0.0)
+
+    def get_node_available_memory(self, node_id):
+        """获取特定节点的剩余内存"""
+        node = self.network.get_node(node_id)
+        return node.available_memory if node else 0.0
+
     def cleanup_expired_dts(self, current_time):
         """
         清理长时间未被访问的 DT 实例，回收物理机内存

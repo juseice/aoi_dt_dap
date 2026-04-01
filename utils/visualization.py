@@ -2,10 +2,12 @@
 import matplotlib.pyplot as plt
 import networkx as nx
 import collections
+import math
 
 from core import EdgeNode
 from core import Sensor
 from core import UserNode
+
 
 
 def plot_network_topology(network):
@@ -167,8 +169,6 @@ def plot_simulation_results(metrics_history):
     plt.show()
 
 
-# utils/visualization.py (追加在文件末尾)
-
 def plot_comparative_results(histories):
     """
     绘制多种算法的对比折线图
@@ -182,19 +182,40 @@ def plot_comparative_results(histories):
         'Greedy Best': {'color': '#2196f3', 'marker': 'o', 'linestyle': '-'},  # 蓝色实线
         # 给 DP 分配同一种绿色，用虚实线和不同的形状区分
         'DP Ideal': {'color': '#4caf50', 'marker': '^', 'linestyle': '--'},  # 绿色虚线 (三角形标记)：理想理论值
-        'DP Real': {'color': '#4caf50', 'marker': 's', 'linestyle': '-'}  # 绿色实线 (正方形标记)：现实执行值
+        'DP Real': {'color': '#4caf50', 'marker': 's', 'linestyle': '-'},  # 绿色实线 (正方形标记)：现实执行值
+        'PPO (DRL)': {'color': '#FF9800', 'marker': 'd', 'linestyle': '-'},  # 橙色实线 (菱形标记)：强化学习结果
     }
+    desired_order = ['DP Ideal (Oracle)', 'Random Baseline', 'Greedy Best', 'DP Real (Simulated)', 'PPO (DRL)']
+    sorted_labels = sorted(histories.keys(), key=lambda l: desired_order.index(l) if l in desired_order else 999)
 
-    for label, history in histories.items():
+    for label in sorted_labels:
+        history = histories.get(label)
         if not history:
             continue
 
         # 如果传入的 label 不在预设里，给个默认灰色
         style = style_map.get(label, {'color': 'gray', 'marker': '.'})
 
-        reqs = [data['req'] for data in history]
-        aois = [data['aoi'] for data in history]
-        costs = [data['cost'] for data in history]
+        reqs = []
+        aois = []
+        costs = []
+
+        for h in history:
+            reqs.append(h['req'])
+            # 如果是 inf，用 None 替代，这样 matplotlib 会在这里画一个断点，
+            # 或者你可以选择在汇总报告中过滤，并在画图时直接跳过非法点，
+            # 这里的处理方式会在对应请求ID处留空，直观展现失败
+            if math.isinf(h['aoi']):
+                aois.append(None)
+            else:
+                aois.append(h['aoi'])
+
+            # (原代码这里有个reqs.append重复了，且costs重复收集，已修正为单次遍历收集)
+            # 处理 Cost 中的 inf 同样可以使用 None
+            if math.isinf(h['cost']):
+                costs.append(None)
+            else:
+                costs.append(h['cost'])
 
         # 1. 绘制 AoI 对比
         ax1.plot(reqs, aois, label=label, color=style['color'], marker=style['marker'],
@@ -209,14 +230,14 @@ def plot_comparative_results(histories):
     ax1.set_xlabel('Request Sequence', fontsize=12)
     ax1.set_ylabel('AoI (seconds)', fontsize=12)
     ax1.grid(True, linestyle=':', alpha=0.8)
-    ax1.legend(fontsize=12)
+    ax1.legend(fontsize=12, loc='best')
 
     # 装饰 Cost 图表
     ax2.set_title('System Operational Cost Comparison', fontsize=14, fontweight='bold')
     ax2.set_xlabel('Request Sequence', fontsize=12)
     ax2.set_ylabel('Total Cost', fontsize=12)
     ax2.grid(True, linestyle=':', alpha=0.8)
-    ax2.legend(fontsize=12)
+    ax2.legend(fontsize=12, loc='best')
 
     plt.tight_layout()
     plt.show()

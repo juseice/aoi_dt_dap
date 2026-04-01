@@ -126,7 +126,7 @@ def run_evaluation(algo_name, solver_func, total_reqs=15, seed=42):
                 return []
 
             for i, req in enumerate(request_stream):
-                sim.cleanup_expired_dts(req.time)
+                sim.cleanup_expired_dts(req.trigger_time)
                 # 强行提取 DP 计划中的目标节点
                 planned_node_id = dp_plan[i]['node_id']
                 target_node = net.get_node(planned_node_id)
@@ -134,7 +134,7 @@ def run_evaluation(algo_name, solver_func, total_reqs=15, seed=42):
                 try:
                     # 强行在物理世界执行！(这里会自动产生真实的排队时延)
                     real_sense, real_queue, real_comp, real_res, real_mig = sim.commit_step(
-                        target_node, req.task_chain, req.user, req.time
+                        target_node, req.task_chain, req.user, req.trigger_time
                     )
 
                     real_aoi = estimate_aoi(real_sense, real_queue, real_comp, real_res)
@@ -185,18 +185,18 @@ def run_evaluation(algo_name, solver_func, total_reqs=15, seed=42):
 
     # 3. 开始仿真循环
     for req in request_stream:
-        evicted_dts = sim.cleanup_expired_dts(req.time)
+        evicted_dts = sim.cleanup_expired_dts(req.trigger_time)
         for dt_id, node_id, mem_req in evicted_dts:
             logger.info(
-                f" [内存回收] t={req.time:.1f}s | {dt_id} 因超时未访问被卸载，Node {node_id} 恢复 {mem_req}G 内存")
+                f" [内存回收] t={req.trigger_time:.1f}s | {dt_id} 因超时未访问被卸载，Node {node_id} 恢复 {mem_req}G 内存")
 
         best_node, score, estimated_metrics = solver_func(
-            sim, net, req.task_chain, req.user, alpha, beta, req.time
+            sim, net, req.task_chain, req.user, alpha, beta, req.trigger_time
         )
 
         if best_node is not None:
             real_sense, real_queue, real_comp, real_res, real_mig = sim.commit_step(
-                best_node, req.task_chain, req.user, req.time
+                best_node, req.task_chain, req.user, req.trigger_time
             )
             real_aoi = estimate_aoi(real_sense, real_queue, real_comp, real_res)
             real_cost = compute_cost(best_node, real_comp, req.task_chain, real_mig)

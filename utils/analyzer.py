@@ -2,6 +2,7 @@
 import json
 import os
 from utils.logger import logger
+import math
 
 
 def save_simulation_results(histories, filename="results/latest_simulation.json"):
@@ -34,18 +35,23 @@ def generate_summary_report(histories, total_requests):
             continue
 
         # 1. 成功率 (部署成功的请求 / 总请求)
-        success_count = len(history)
-        success_rate = (success_count / total_requests) * 100
+        successful_reqs = [h for h in history if not math.isinf(h['aoi'])]
+        success_count = len(successful_reqs)
+
+        success_rate = (success_count / total_requests) * 100 if total_requests > 0 else 0
 
         # 2. 平均指标
-        avg_aoi = sum(item['aoi'] for item in history) / success_count
-        avg_cost = sum(item['cost'] for item in history) / success_count
+        if success_count > 0:
+            avg_aoi = sum(h['aoi'] for h in successful_reqs) / success_count
+            avg_cost = sum(h['cost'] for h in successful_reqs) / success_count
+        else:
+            avg_aoi = float('inf')
+            avg_cost = float('inf')
 
         # 3. 总迁移次数
-        total_migrations = sum(1 for item in history if item.get('migrated', False))
+        total_mig = sum(1 for h in successful_reqs if h.get('migrated', False))
 
-        # 格式化输出对齐
-        row = f"{algo_name:<20} | {success_rate:>6.1f}% ({success_count:<4}) | {avg_aoi:>12.3f} | {avg_cost:>12.3f} | {total_migrations:>15}"
-        logger.info(row)
+        logger.info(
+            f"{algo_name:<22} | {success_rate:>6.1f}% ({success_count:<4}/{total_requests:<2}) | {avg_aoi:>10.3f} | {avg_cost:>10.3f} | {total_mig:>15}")
 
     logger.info("=" * 70 + "\n")
