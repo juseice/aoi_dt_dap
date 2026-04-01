@@ -1,13 +1,6 @@
 # environment/event.py
 import random
-
-class Request:
-    """定义一个独立的请求事件"""
-    def __init__(self, req_id, trigger_time, user, task_chain):
-        self.id = req_id
-        self.time = trigger_time
-        self.user = user
-        self.task_chain = task_chain
+from core.request import Request
 
 def generate_poisson_requests(users, task_chains, arrival_rate=1.0, total_requests=20, seed=None):
     """

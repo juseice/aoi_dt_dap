@@ -18,14 +18,14 @@ def train_and_evaluate_ppo():
 
     # 1. 准备物理网络环境
     # net, users, task_chains = setup_clean_environment()
-    dataset = load_dataset("../data/dataset_small.pkl")
+    dataset = load_dataset("../data/dataset_debug.pkl")
     net = dataset['network']
     users = dataset['users']
     task_chains = dataset['task_chains']
 
 
     # 训练时的请求序列可以长一点
-    TRAIN_REQS_PER_EPISODE = 200
+    TRAIN_REQS_PER_EPISODE = 500
 
     # 为了让 SB3 运行更稳，我们用一个 lambda 函数来实例化你的 Env
     env_maker = lambda: DTEngineEnv(
@@ -64,7 +64,7 @@ def train_and_evaluate_ppo():
     # 评估时，我们需要用一个【固定 Seed】的干净环境，以保证公平性
     EVAL_REQS = 30
     # eval_net, eval_users, eval_task_chains = setup_clean_environment()
-    dataset = load_dataset("../data/dataset_small.pkl")
+    dataset = load_dataset("../data/dataset_debug.pkl")
     eval_net = dataset['network']
     eval_users = dataset['users']
     eval_task_chains = dataset['task_chains']

@@ -20,7 +20,7 @@ def select_random_node(simulator, network, task_chain, user, alpha, beta, reques
     for node in network.get_edge_nodes():
         # C2 资源约束
         if not check_memory_constraint(node, task_chain, simulator):
-            logger.info(f"内存淘汰 {node.id}")
+            # logger.info(f"内存淘汰 {node.id}")
             continue
 
         # C4 带宽约束 (传感器 -> 边缘节点)
@@ -28,12 +28,12 @@ def select_random_node(simulator, network, task_chain, user, alpha, beta, reques
         sensor = network.get_node(sensor_id)
         raw_data_size = sensor.data_size
         if not check_bandwidth_constraint(network, sensor_id, node.id, raw_data_size, task_chain.required_bandwidth):
-            logger.info(f"上行带宽淘汰 {node.id}")
+            # logger.info(f"上行带宽淘汰 {node.id}")
             continue
 
         # 连通性约束 (边缘节点 -> 用户)
         if not network.get_path(node.id, user.id, 1.0):
-            logger.info(f"用户联通淘汰 {node.id}")
+            # logger.info(f"用户联通淘汰 {node.id}")
             continue
 
         # 通过所有校验，加入可用候选池

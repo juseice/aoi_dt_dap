@@ -29,6 +29,7 @@ from environment.rl_env import DTEngineEnv
 from stable_baselines3 import PPO
 from environment.rl_env import DTEngineEnv
 from utils.data_generator import load_dataset
+from utils.analyzer import save_simulation_results, generate_summary_report
 
 
 def setup_clean_environment():
@@ -96,7 +97,7 @@ def run_evaluation(algo_name, solver_func, total_reqs=15, seed=42):
     #     users=users, task_chains=task_chains,
     #     arrival_rate=0.5, total_requests=total_reqs, seed=seed
     # )
-    dataset = load_dataset("data/dataset_small.pkl")
+    dataset = load_dataset("data/dataset_debug.pkl")
 
     net = dataset['network']
     users = dataset['users']
@@ -165,7 +166,7 @@ def run_evaluation(algo_name, solver_func, total_reqs=15, seed=42):
 
         for req in request_stream:
             # deterministic=True 表示取消探索，每次都严格选最优动作
-            action, _ = model.predict(obs, deterministic=True)
+            action, _ = model.predict(obs)
             obs, reward, terminated, truncated, info = env.step(action)
 
             history.append({
@@ -244,8 +245,13 @@ def test_rl_environment():
 
 
 def main():
-    TOTAL_REQUESTS = 20
-    COMMON_SEED = 42  # 随便取一个幸运数字
+    logger.info("正在加载测试数据集...")
+    dataset = load_dataset("data/dataset_debug.pkl")
+
+    # 动态获取当前考卷的请求总数
+    TOTAL_REQUESTS = len(dataset['request_stream'])
+    COMMON_SEED = dataset['config']['seed']
+    logger.info(f"数据集加载完毕：包含 {TOTAL_REQUESTS} 个请求。")
 
     # 1. 跑 Baseline (随机策略)
     history_random = run_evaluation(
@@ -293,7 +299,14 @@ def main():
         'PPO (DRL)': history_ppo
     }
 
-    logger.info("\n仿真结束，正在生成对比可视化报表...")
+    # 1. 结果落盘保存为 JSON，以后随时可以写脚本读取这个文件画图，不用重新跑仿真
+    save_simulation_results(all_histories, filename="results/latest_simulation.json")
+
+    # 2. 打印酷炫的终端宏观汇总报表
+    generate_summary_report(all_histories, TOTAL_REQUESTS)
+
+    # 3. 依然保留画图功能
+    logger.info("仿真结束，正在生成对比可视化报表...")
     plot_comparative_results(all_histories)
 
     # test_rl_environment()

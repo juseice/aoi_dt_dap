@@ -34,3 +34,6 @@ logs/
 
 # cache
 .cache/
+
+# result
+/results/latest_simulation.json
