@@ -1,14 +1,111 @@
 # train_ppo.py
 import os
 import numpy as np
+import pandas as pd
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.callbacks import BaseCallback
 from utils.logger import logger
 from utils.visualization import plot_simulation_results
+
 
 from environment.rl_env import DTEngineEnv
 from main import setup_clean_environment  # 暂用建图
 from utils.data_generator import load_dataset
+
+
+# ==========================================
+# 训练过程数据记录器 (用于论文 6.4.1 画收敛图)
+# ==========================================
+class ConvergenceLoggerCallback(BaseCallback):
+    def __init__(self, model_name, verbose=0):
+        super().__init__(verbose)
+        self.model_name = model_name
+        self.episode_rewards = []
+        self.current_reward = 0.0
+
+    def _on_step(self) -> bool:
+        # 累加每一步的 reward
+        self.current_reward += self.locals['rewards'][0]
+
+        # 检查回合是否结束 (dones 是一个布尔数组，因为我们用了 vec_env)
+        if self.locals['dones'][0]:
+            self.episode_rewards.append(self.current_reward)
+            self.current_reward = 0.0
+        return True
+
+    def _on_training_end(self) -> None:
+        # 训练结束后，将收敛数据落盘为 CSV
+        os.makedirs("results/training_logs", exist_ok=True)
+        df = pd.DataFrame({
+            'Episode': range(1, len(self.episode_rewards) + 1),
+            'Cumulative_Reward': self.episode_rewards
+        })
+        csv_path = f"results/training_logs/{self.model_name}_convergence.csv"
+        df.to_csv(csv_path, index=False)
+        logger.info(f"模型 {self.model_name} 的收敛数据已保存至 {csv_path}")
+
+
+def train_pareto_models():
+    logger.info("\n" + "=" * 50)
+    logger.info("启动自动化 DRL 训练矩阵 (生成帕累托模型库)")
+    logger.info("=" * 50)
+
+    # 1. 加载数据集
+    dataset = load_dataset("../data/dataset_large.pkl")
+
+    net = dataset['network']
+    users = dataset['users']
+    task_chains = dataset['task_chains']
+
+    # 训练参数
+    TRAIN_REQS_PER_EPISODE = 500  # 让每回合足够长，让智能体吃尽苦头去学习
+    TOTAL_TIMESTEPS = 50000       # 每个模型的总训练步数 (如果算力够，可设为 100000)
+
+    # 2. 设定我们要探索的权重组合 (alpha: 成本权重, beta: AoI 权重)
+    pareto_weights = [
+        (0.9, 0.1), # 极端偏好：省钱 (Cost 优先)
+        (0.7, 0.3),
+        (0.5, 0.5), # 绝对平衡
+        (0.3, 0.7),
+        (0.1, 0.9)  # 极端偏好：新鲜度 (AoI 优先)
+    ]
+
+    os.makedirs("models/pareto", exist_ok=True)
+
+    # 3. 开始循环炼丹
+    for alpha, beta in pareto_weights:
+        model_name = f"ppo_a{alpha}_b{beta}_large"
+        logger.info(f"\n>>> 正在训练模型: {model_name} (Cost权={alpha}, AoI权={beta}) <<<")
+
+        # 动态实例化带有特定权重的 Env
+        env_maker = lambda: DTEngineEnv(
+            network=net,
+            users=users,
+            task_chains=task_chains,
+            request_stream=None, # 训练时传入 None，让环境内部自己随机生成请求，增加样本多样性
+            total_reqs=TRAIN_REQS_PER_EPISODE,
+            seed=None,
+            alpha=alpha,
+            beta=beta
+        )
+
+        vec_env = make_vec_env(env_maker, n_envs=1)
+
+        # 构建 PPO 模型
+        model = PPO("MlpPolicy", vec_env, verbose=0, learning_rate=3e-4,
+                    tensorboard_log=f"./tensorboard_logs/{model_name}/")
+
+        # 挂载记录器并开始训练
+        callback = ConvergenceLoggerCallback(model_name=model_name)
+        model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=callback)
+
+        # 保存训练好的大脑权重
+        save_path = f"models/pareto/{model_name}"
+        model.save(save_path)
+        logger.info(f" 模型已保存至 {save_path}.zip")
+
+    logger.info("\n 所有帕累托偏好模型训练完毕！")
 
 
 def train_and_evaluate_ppo():
@@ -22,7 +119,6 @@ def train_and_evaluate_ppo():
     net = dataset['network']
     users = dataset['users']
     task_chains = dataset['task_chains']
-
 
     # 训练时的请求序列可以长一点
     TRAIN_REQS_PER_EPISODE = 500
@@ -108,4 +204,5 @@ def train_and_evaluate_ppo():
 
 
 if __name__ == "__main__":
-    train_and_evaluate_ppo()
+    train_pareto_models()
+

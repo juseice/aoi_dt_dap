@@ -104,7 +104,7 @@ def run_evaluation(algo_name, solver_func, total_reqs=15, seed=42):
     task_chains = dataset['task_chains']
     request_stream = dataset['request_stream']
 
-    # plot_network_topology(net)  # 如果你想看图，可以把这行取消注释
+    plot_network_topology(net)  # 如果你想看图，可以把这行取消注释
     sim = Simulator(net, dt_ttl=10.0)
 
     alpha, beta = 1.0, 1.0

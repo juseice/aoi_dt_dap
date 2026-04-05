@@ -14,13 +14,13 @@ class DTEngineEnv(gym.Env):
     边缘网络数字孪生部署的 RL 环境
     """
 
-    def __init__(self, network, users, task_chains, request_stream=None, total_reqs=50, seed=42):
+    def __init__(self, network, users, task_chains, request_stream=None, total_reqs=50, seed=42,
+                 alpha=0.5, beta=0.5):  # 【修改1】新增 alpha 和 beta 参数，默认各占一半
         super(DTEngineEnv, self).__init__()
 
         self.network = network
         self.users = users
         self.task_chains = task_chains
-        self.total_reqs = total_reqs
         self.seed = seed
 
         self.fixed_request_stream = request_stream
@@ -30,6 +30,7 @@ class DTEngineEnv(gym.Env):
         else:
             self.request_stream = None
             self.total_reqs = total_reqs
+        self.seed = seed
 
         # 提取所有的边缘节点 (动作空间的备选项)
         self.edge_nodes = self.network.get_edge_nodes()
@@ -63,11 +64,12 @@ class DTEngineEnv(gym.Env):
         self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(self.obs_dim,), dtype=np.float32)
 
         # RL Reward Hyperparameters (对应公式 7)
-        self.alpha = 1.0
-        self.beta = 1.0
-        self.Z = 20.0  # 缩放系数 Z
-        self.R_finish = 10.0  # 成功完成任务的固定基础奖励
-        self.R_penalty = -5.0  # 违反物理约束的惩罚 (比之前的 -100 温和，防止网络过度害怕)
+        self.alpha = alpha
+        self.beta = beta
+
+        self.Z = 20.0
+        self.R_finish = 10.0
+        self.R_penalty = -5.0
 
         # 预先提取网络中的全局最强属性，用于计算公式(8)的理论极限
         self.max_compute = max([n.compute_power for n in self.edge_nodes])
