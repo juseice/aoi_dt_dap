@@ -108,6 +108,51 @@ def train_pareto_models():
     logger.info("\n 所有帕累托偏好模型训练完毕！")
 
 
+def train_scalability_models():
+    logger.info("\n" + "=" * 50)
+    logger.info("启动自动化炼丹：针对不同网络规模训练专属 PPO 模型")
+    logger.info("=" * 50)
+
+    node_scales = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
+    TRAIN_REQS_PER_EPISODE = 500
+    TOTAL_TIMESTEPS = 40000  # 规模越大，可能需要的步数越多，这里统一给 4万步
+
+    os.makedirs("models/scalability", exist_ok=True)
+
+    for n in node_scales:
+        model_name = f"ppo_scale_{n}"
+        logger.info(f"\n>>> 正在训练 {n} 节点规模的专属模型: {model_name} <<<")
+
+        # 1. 加载对应规模的真实拓扑数据集
+        # (确保你已经用生成脚本生成了 dataset_10_nodes.pkl 等文件)
+        dataset_path = f"../data/dataset_{n}_nodes.pkl"
+        if not os.path.exists(dataset_path):
+            logger.error(f"找不到数据集 {dataset_path}，请先生成！")
+            continue
+
+        dataset = load_dataset(dataset_path)
+
+        # 2. 实例化专属环境 (权衡参数固定为 0.5 即可)
+        env_maker = lambda: DTEngineEnv(
+            network=dataset['network'],
+            users=dataset['users'],
+            task_chains=dataset['task_chains'],
+            request_stream=None,  # 训练时用随机请求流
+            total_reqs=TRAIN_REQS_PER_EPISODE,
+            seed=None,
+            alpha=0.5, beta=0.5
+        )
+        vec_env = make_vec_env(env_maker, n_envs=1)
+
+        # 3. 训练并保存
+        model = PPO("MlpPolicy", vec_env, verbose=0, learning_rate=3e-4)
+        model.learn(total_timesteps=TOTAL_TIMESTEPS)
+
+        save_path = f"models/scalability/{model_name}"
+        model.save(save_path)
+        logger.info(f"规模 {n} 的模型已保存至 {save_path}.zip")
+
+
 def train_and_evaluate_ppo():
     logger.info("\n" + "=" * 50)
     logger.info("1：初始化 DRL 训练环境 (PPO)")
