@@ -11,6 +11,7 @@ PROJECT_ROOT = str(Path(__file__).resolve().parents[1])
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 
 # 全局统一配色与样式字典
+# sns.set_theme(style="whitegrid", palette="muted")
 STYLE_MAP = {
     'Random': {'color': '#f44336', 'marker': 'x', 'linestyle': '--'},
     'Greedy': {'color': '#2196f3', 'marker': 'o', 'linestyle': '-'},
@@ -19,6 +20,18 @@ STYLE_MAP = {
     'PPO (Balanced)': {'color': '#FF9800', 'marker': 'd', 'linestyle': '-'},
     'PPO': {'color': '#FF9800', 'marker': 'd', 'linestyle': '-'}  # 兼容不同命名
 }
+# plt.rcParams.update({
+#     'font.size': 8,          # 全局默认基础字体大小 (原默认是10，可改为 8 或 9)
+#     'axes.titlesize': 10,     # 子图标题字体大小 (例如 (a) Request Success Rate)
+#     'axes.labelsize': 9,     # X/Y 轴说明文字字体大小
+#     'xtick.labelsize': 6,     # X 轴刻度数字大小
+#     'ytick.labelsize': 6,     # Y 轴刻度数字大小
+#     'legend.fontsize': 8,    # 图例字体大小
+#     'figure.titlesize': 12,   # 整个大图的总标题字体大小
+#     'figure.autolayout': False # 开启自动布局防裁剪 (非常关键！)
+# })
+# plt.rcParams['font.family'] = 'sans-serif'
+# plt.rcParams['axes.unicode_minus'] = False # 正常显示负号
 
 
 def get_style(algo_name):
@@ -83,14 +96,14 @@ def plot_scalability():
         # 绘制执行时间 (使用对数坐标 Y 轴)
         ax_time.plot(x, algo_data['Avg_Latency_ms'], label=algo, **style, linewidth=2.5, markersize=8)
 
-    ax_time.set_title('Algorithm Execution Time vs Network Scale', fontsize=14, fontweight='bold')
-    ax_time.set_xlabel('Number of Edge Nodes (N)', fontsize=12)
-    ax_time.set_ylabel('Average Decision Latency (ms) [Log Scale]', fontsize=12)
+    ax_time.set_title('Algorithm Execution Time vs Network Scale', fontweight='bold')
+    ax_time.set_xlabel('Number of Edge Nodes (N)')
+    ax_time.set_ylabel('Average Decision Latency (ms) [Log Scale]')
 
     # 开启对数坐标！这是展示 DP 指数爆炸的关键
     ax_time.set_yscale('log')
     ax_time.grid(True, which="both", linestyle=':', alpha=0.7)
-    ax_time.legend(fontsize=11)
+    ax_time.legend()
 
     plt.tight_layout()
     plt.savefig(os.path.join(RESULTS_DIR, "fig_scalability.png"), bbox_inches='tight')
@@ -118,17 +131,17 @@ def plot_pareto():
         # 给 PPO 的点打上 alpha 标签
         for _, row in ppo_df.iterrows():
             ax.annotate(f"α={row['Weight_Alpha']}", (row['Avg_AoI'], row['Avg_Cost']),
-                        textcoords="offset points", xytext=(10, 5), ha='left', fontsize=9)
+                        textcoords="offset points", xytext=(10, 5), ha='left')
 
     if not greedy_df.empty:
         ax.plot(greedy_df['Avg_AoI'], greedy_df['Avg_Cost'], marker='o', color='#2196f3',
                 linestyle='--', linewidth=2, markersize=8, label='Greedy Trade-off')
 
-    ax.set_title('Cost vs AoI Pareto Trade-off', fontsize=14, fontweight='bold')
-    ax.set_xlabel('Average AoI (seconds) [Lower is Better]', fontsize=12)
-    ax.set_ylabel('Average Operational Cost [Lower is Better]', fontsize=12)
+    ax.set_title('Cost vs AoI Pareto Trade-off', fontweight='bold')
+    ax.set_xlabel('Average AoI (seconds) [Lower is Better]')
+    ax.set_ylabel('Average Operational Cost [Lower is Better]')
     ax.grid(True, linestyle=':', alpha=0.7)
-    ax.legend(fontsize=11)
+    ax.legend()
 
     plt.tight_layout()
     plt.savefig(os.path.join(RESULTS_DIR, "fig_pareto.png"), bbox_inches='tight')
@@ -162,17 +175,17 @@ def plot_pareto_front():
     for i, row in df_ppo.iterrows():
         plt.annotate(f"α={row['Weight_Alpha']}",
                      (row['Avg_Cost'], row['Avg_AoI']),
-                     textcoords="offset points", xytext=(10, 10), ha='left', fontsize=10)
+                     textcoords="offset points", xytext=(10, 10), ha='left')
 
-    plt.title('Pareto Front: System Cost vs. Information Freshness (AoI)', fontsize=16, pad=15, fontweight='bold')
-    plt.xlabel('Average System Cost (Lower is better)', fontsize=14)
-    plt.ylabel('Average AoI (Lower is better)', fontsize=14)
-    plt.legend(fontsize=12, loc='upper right')
+    plt.title('Pareto Front: System Cost vs. Information Freshness (AoI)', pad=15, fontweight='bold')
+    plt.xlabel('Average System Cost (Lower is better)')
+    plt.ylabel('Average AoI (Lower is better)')
+    plt.legend(loc='upper right')
 
     # 越靠近左下角性能越好，画个箭头提示
     plt.annotate('Better Performance', xy=(0.05, 0.05), xycoords='axes fraction',
                  xytext=(0.3, 0.2), arrowprops=dict(facecolor='black', shrink=0.05, width=1.5, headwidth=8),
-                 fontsize=12, fontweight='bold', color='#2c3e50')
+                 fontweight='bold', color='#2c3e50')
 
     save_path = os.path.join(PROJECT_ROOT, "results", "plot_pareto_front.png")
     plt.tight_layout()
@@ -200,26 +213,26 @@ def plot_baseline_comparison():
 
     # 1. 成功率对比 (越高越好)
     sns.barplot(x='Algorithm', y='Success_Rate', data=df, ax=axes[0], palette=colors)
-    axes[0].set_title('(a) Request Success Rate ↑', fontsize=14, fontweight='bold')
+    axes[0].set_title('(a) Request Success Rate ↑', fontweight='bold')
     axes[0].set_ylabel('Success Rate (%)')
     axes[0].set_ylim(0, 100)
 
     # 2. 平均 AoI 对比 (越低越好)
     sns.barplot(x='Algorithm', y='Avg_AoI', data=df, ax=axes[1], palette=colors)
-    axes[1].set_title('(b) Average AoI ↓', fontsize=14, fontweight='bold')
+    axes[1].set_title('(b) Average AoI ↓', fontweight='bold')
     axes[1].set_ylabel('Age of Information (ms/s)')
 
     # 3. 平均成本对比 (越低越好)
     sns.barplot(x='Algorithm', y='Avg_Cost', data=df, ax=axes[2], palette=colors)
-    axes[2].set_title('(c) Average Deployment Cost ↓', fontsize=14, fontweight='bold')
+    axes[2].set_title('(c) Average Deployment Cost ↓', fontweight='bold')
     axes[2].set_ylabel('Cost Units')
 
     # 美化 X 轴标签
     for ax in axes:
         ax.set_xlabel('')
-        ax.tick_params(axis='x', rotation=15, labelsize=12)
+        ax.tick_params(axis='x', rotation=15)
 
-    plt.suptitle('Performance Comparison Across Different Algorithms', fontsize=18, fontweight='bold', y=1.05)
+    plt.suptitle('Performance Comparison Across Different Algorithms', fontweight='bold')
 
     save_path = os.path.join(PROJECT_ROOT, "results", "plot_baseline_comparison.png")
     plt.tight_layout()
@@ -271,12 +284,12 @@ def plot_timeseries_analysis():
     # 标注流量突发区 (假设在 300-500 步之间发生拥塞，可根据真实数据调整阴影位置)
     plt.axvspan(300, 500, color='yellow', alpha=0.15, label='High Traffic Burst Area')
 
-    plt.title('Dynamic AoI Response under Real-world Traffic Fluctuations', fontsize=16, pad=15, fontweight='bold')
-    plt.xlabel('Request Sequence (Time Step)', fontsize=14)
-    plt.ylabel('Instantaneous AoI (Smoothed)', fontsize=14)
+    plt.title('Dynamic AoI Response under Real-world Traffic Fluctuations', pad=15, fontweight='bold')
+    plt.xlabel('Request Sequence (Time Step)')
+    plt.ylabel('Instantaneous AoI (Smoothed)')
 
     # 将图例放在外侧防遮挡
-    plt.legend(fontsize=12, loc='upper left', bbox_to_anchor=(1, 1))
+    plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
 
     save_path = os.path.join(PROJECT_ROOT, "results", "plot_timeseries_stress.png")
     plt.tight_layout()

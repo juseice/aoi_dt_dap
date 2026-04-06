@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import pickle
 from datetime import datetime
+import networkx as nx
 from geopy.distance import geodesic
 import random
 
@@ -48,6 +49,7 @@ def build_real_dataset(telecom_path: str, alibaba_path: str,
                        seed: int = 42):
     """
     基于真实数据集（上海电信 + 阿里集群）构建边缘数字孪生仿真环境
+    支持大容量扩容 + MST 距离受限骨干网拓扑
     """
     np.random.seed(seed)
     random.seed(seed)
@@ -60,7 +62,7 @@ def build_real_dataset(telecom_path: str, alibaba_path: str,
     task_chains = []
     request_stream = []
 
-    logger.info("=== 开始构建数据驱动的边缘仿真环境 ===")
+    logger.info("=== 开始构建数据驱动的边缘仿真环境 V2 ===")
 
     # ==========================================
     # 第一步：解析上海电信数据集 -> 生成 Network & EdgeNodes (物理骨干网)
@@ -81,11 +83,11 @@ def build_real_dataset(telecom_path: str, alibaba_path: str,
         # 异构节点生成：随机分配 3 个梯队的算力和内存 (20%强，60%中，20%弱)
         tier = np.random.choice([0, 1, 2], p=[0.2, 0.6, 0.2])
         if tier == 0:
-            cp, mem, cost = 20.0, 16.0, 10.0
+            cp, mem, cost = 8.0, 128.0, 10.0  # 大型核心边缘机房
         elif tier == 1:
-            cp, mem, cost = 10.0, 8.0, 5.0
+            cp, mem, cost = 4.0, 64.0, 5.0  # 中型汇聚节点
         else:
-            cp, mem, cost = 2.0, 4.0, 1.0
+            cp, mem, cost = 1.6, 32.0, 2.0  # 小型接入基站
 
         en = EdgeNode(id=f"EN_{i}", compute_power=cp, cost=cost, memory=mem)
         en.lat, en.lon = loc[0], loc[1]
@@ -93,15 +95,45 @@ def build_real_dataset(telecom_path: str, alibaba_path: str,
         net.add_node(en)
 
     # 构建基站间的骨干网链路
+    logger.info("-> 正在使用 MST + 距离受限算法构建骨干网...")
+
+    # 1. 计算所有节点之间的物理距离
+    distances = {}
+    temp_g = nx.Graph()
     for i in range(len(edge_nodes)):
+        temp_g.add_node(i)
         for j in range(i + 1, len(edge_nodes)):
             dist_m = geodesic((edge_nodes[i].lat, edge_nodes[i].lon),
                               (edge_nodes[j].lat, edge_nodes[j].lon)).meters
-            bw = max(50.0, 200.0 - (dist_m / 1000.0) * 20.0)
-            net.add_edge(
-                Edge(id=f"Link_E{i}_E{j}", source_node=edge_nodes[i], terminal_node=edge_nodes[j], bandwidth=bw))
-            net.add_edge(
-                Edge(id=f"Link_E{j}_E{i}", source_node=edge_nodes[j], terminal_node=edge_nodes[i], bandwidth=bw))
+            distances[(i, j)] = dist_m
+            temp_g.add_edge(i, j, weight=dist_m)
+
+    # 2. 提取最小生成树 (MST)，这一步是为了保证图绝对不会出现“孤岛节点”
+    mst = nx.minimum_spanning_tree(temp_g, weight='weight')
+    mst_edges = set(mst.edges())
+
+    # 3. 设定通信半径 (单位: 米)
+    COMM_RADIUS = 3000.0
+
+    links_created = 0
+    for i in range(len(edge_nodes)):
+        for j in range(i + 1, len(edge_nodes)):
+            dist_m = distances[(i, j)]
+            in_mst = (i, j) in mst_edges or (j, i) in mst_edges
+
+            # 建立连接的条件：要么它是 MST 上的兜底骨干链路，要么距离小于通信半径
+            if in_mst or dist_m <= COMM_RADIUS:
+                # 带宽也进行扩容，光纤骨干网带宽大幅提升
+                bw = max(100.0, 500.0 - (dist_m / 1000.0) * 50.0)
+
+                net.add_edge(
+                    Edge(id=f"Link_E{i}_E{j}", source_node=edge_nodes[i], terminal_node=edge_nodes[j], bandwidth=bw))
+                net.add_edge(
+                    Edge(id=f"Link_E{j}_E{i}", source_node=edge_nodes[j], terminal_node=edge_nodes[i], bandwidth=bw))
+                links_created += 1
+
+    logger.info(
+        f"-> 骨干网构建完毕！共生成 {links_created} 条双向物理链路。(全连接需要 {len(edge_nodes) * (len(edge_nodes) - 1) // 2} 条)")
 
     # ==========================================
     # 第二步：生成物理传感器 (Sensors) 并绑定上行链路
@@ -151,7 +183,7 @@ def build_real_dataset(telecom_path: str, alibaba_path: str,
                 min_dist = dist
                 nearest_en = en
 
-        uplink_bw = random.uniform(10.0, 20.0)
+        uplink_bw = random.uniform(20.0, 50.0)
         net.add_edge(Edge(id=f"Uplink_{sensor.id}_{nearest_en.id}",
                           source_node=sensor, terminal_node=nearest_en, bandwidth=uplink_bw))
 
@@ -197,7 +229,16 @@ def build_real_dataset(telecom_path: str, alibaba_path: str,
     logger.info("4. 提取真实移动轨迹，生成用户请求流...")
     df_telecom['start time'] = pd.to_datetime(df_telecom['start time'])
     df_telecom = df_telecom.sort_values(by='start time')
-    df_requests = df_telecom.head(total_requests).copy()
+    max_start_idx = len(df_telecom) - total_requests
+    if max_start_idx > 0:
+        # 你甚至可以手动指定一个 start_idx 来固定截取某个早高峰的切片
+        start_idx = np.random.randint(0, max_start_idx)
+        df_requests = df_telecom.iloc[start_idx: start_idx + total_requests].copy()
+    else:
+        df_requests = df_telecom.copy()
+
+    base_time = df_requests['start time'].iloc[0]
+    df_requests['relative_time'] = (df_requests['start time'] - base_time).dt.total_seconds()
 
     base_time = df_requests['start time'].iloc[0]
     df_requests['relative_time'] = (df_requests['start time'] - base_time).dt.total_seconds()

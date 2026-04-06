@@ -477,8 +477,8 @@ if __name__ == "__main__":
     real_dataset_path = os.path.join(PROJECT_ROOT, "data", "dataset_real_30.pkl")
     real_dataset = load_dataset(real_dataset_path)
 
-    # run_real_world_pareto_analysis(real_dataset)
-    # run_baseline_comparison(real_dataset)
+    run_real_world_pareto_analysis(real_dataset)
+    run_baseline_comparison(real_dataset)
     run_timeseries_stress_test(real_dataset)
     generate_spatial_heatmap_data(real_dataset)
 

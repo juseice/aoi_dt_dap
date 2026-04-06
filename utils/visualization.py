@@ -147,7 +147,7 @@ def plot_network_topology(network):
     plt.show()
 
 
-def plot_macro_topology(network, geo_csv_path=None):
+def plot_macro_topology(network, geo_csv_path=None, layout_type='spring'):
     """
     绘制用于大规模节点（如 50+ 节点）的宏观全景拓扑图。
     去除了冗余的文字标签、边带宽文字，缩小了节点体积，
@@ -166,36 +166,37 @@ def plot_macro_topology(network, geo_csv_path=None):
     for node_id, data in G.nodes(data=True):
         node = data.get('node')
         if type(node).__name__ == 'Sensor':  # 兼容不同导入方式
-            sensors.append(node.id)
+            sensors.append(node_id)
         elif type(node).__name__ == 'UserNode':
-            users.append(node.id)
+            users.append(node_id)
         else:
-            edge_nodes.append(node.id)
+            edge_nodes.append(node_id)
 
         # 尝试获取经纬度作为真实地理位置坐标
         node_id_str = str(node.id)
         if node_id_str in external_geo_dict:
-            pos[node.id] = external_geo_dict[node_id_str]
+            pos[node_id] = external_geo_dict[node_id_str]
         elif hasattr(node, 'lon') and hasattr(node, 'lat'):
-            pos[node.id] = (node.lon, node.lat)
+            pos[node_id] = (node.lon, node.lat)
         else:
             print(f"警告: 节点 {node.id} 无地理信息！")
 
     use_geo = len(pos) > 0
 
     if use_geo:
-        pos = nx.spring_layout(G, pos=pos, k=0.05, iterations=15, seed=42)
+        # pos = nx.spring_layout(G, pos=pos, k=0.5, iterations=15, seed=42)
+        pass
     else:
-        pos = nx.spring_layout(G, k=0.4, iterations=150, seed=42)
+        pos = nx.spring_layout(G, k=0.8, iterations=150, seed=42)
 
     # 3. 优化大规模绘图参数
     # 使用正方形画布，更适合地理分布和弹簧布局
     plt.figure(figsize=(12, 12), dpi=150)
 
-    # 极简绘制节点 (大幅缩小 Size，去除粗黑边框)
-    EDGE_SIZE = 120
-    SENSOR_SIZE = 60
-    USER_SIZE = 60
+    # 绘制节点
+    EDGE_SIZE = 80
+    SENSOR_SIZE = 40
+    USER_SIZE = 6
 
     nx.draw_networkx_nodes(G, pos, nodelist=edge_nodes, node_color='#2196f3',
                            node_shape='o', node_size=EDGE_SIZE, label='Edge Nodes', alpha=0.9, edgecolors='white',
@@ -212,9 +213,9 @@ def plot_macro_topology(network, geo_csv_path=None):
     nx.draw_networkx_edges(G, pos, edge_color='#BDBDBD', width=0.6, alpha=0.3, arrows=False)
 
     # 4. 图表修饰
-    layout_name = "Real Geo-Location Based" if use_geo else "Force-Directed Layout"
-    plt.title(f"Macro Network Topology Overview\n({layout_name}, N={len(edge_nodes)})",
-              fontsize=16, fontweight='bold', pad=20)
+    # layout_name = "Real Geo-Location Based" if use_geo else "Force-Directed Layout"
+    # plt.title(f"Macro Network Topology Overview\n({layout_name}, N={len(edge_nodes)})",
+    #           fontsize=16, fontweight='bold', pad=20)
 
     # 调整图例到右上角，并增加背景透明度防遮挡
     plt.legend(scatterpoints=1, loc='upper right', fontsize=12, framealpha=0.9, edgecolor='#E0E0E0')
@@ -242,7 +243,6 @@ def plot_infrastructure_topology(network, geo_csv_path=None, fixed_pos=None):
 
     # 2. 生成子图 (这会自动过滤掉所有连接到用户的边)
     G_infra = G.subgraph(infra_nodes)
-    external_geo_dict = _load_geo_dict_from_csv(geo_csv_path)
 
     sensors = []
     edge_nodes = []
@@ -277,7 +277,8 @@ def plot_infrastructure_topology(network, geo_csv_path=None, fixed_pos=None):
 
         use_geo = len(pos) > 0
         if use_geo:
-            pos = nx.spring_layout(G_infra, pos=pos, k=0.05, iterations=15, seed=42)
+            # pos = nx.spring_layout(G_infra, pos=pos, k=0.05, iterations=15, seed=42)
+            pass
         else:
             pos = nx.spring_layout(G_infra, k=0.4, iterations=150, seed=42)
 
@@ -285,15 +286,15 @@ def plot_infrastructure_topology(network, geo_csv_path=None, fixed_pos=None):
 
     # 节点大小保持适中
     nx.draw_networkx_nodes(G_infra, pos, nodelist=edge_nodes, node_color='#2196f3',
-                           node_shape='o', node_size=200, label='Edge Nodes', edgecolors='white', linewidths=1)
+                           node_shape='o', node_size=80, label='Edge Nodes', edgecolors='white', linewidths=1)
     nx.draw_networkx_nodes(G_infra, pos, nodelist=sensors, node_color='#4caf50',
-                           node_shape='^', node_size=100, label='Sensors', edgecolors='white', linewidths=1)
+                           node_shape='^', node_size=40, label='Sensors', edgecolors='white', linewidths=1)
 
     # 因为去掉了大量用户的连线，基础设施的连线可以稍微加深一点，展现骨干质感
     nx.draw_networkx_edges(G_infra, pos, edge_color='#9E9E9E', width=1.0, alpha=0.5, arrows=False)
 
-    layout_name = "Geo-Relaxed Layout" if use_geo else "Force-Directed Layout"
-    plt.title(f"Infrastructure Topology\n({layout_name})", fontsize=16, fontweight='bold', pad=20)
+    # layout_name = "Geo-Relaxed Layout" if use_geo else "Force-Directed Layout"
+    # plt.title(f"Infrastructure Topology\n({layout_name})", fontsize=16, fontweight='bold', pad=20)
     plt.legend(scatterpoints=1, loc='upper right', fontsize=12, framealpha=0.9)
     plt.axis('off')
     plt.tight_layout()
