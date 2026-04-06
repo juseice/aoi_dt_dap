@@ -13,6 +13,7 @@ from algorithms.random_agent import RandomAgent
 from algorithms.greedy_agent import GreedyAgent
 from algorithms.dp_agent import DPAgent
 from pathlib import Path
+from collections import defaultdict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -205,15 +206,280 @@ def run_exp_pareto_tradeoff(dataset):
     logger.info(f"实验 4 完成，结果已保存至 {save_path}。")
 
 
+def run_real_world_pareto_analysis(dataset):
+    logger.info("\n>>> 正在进行实验：真实场景帕累托前沿分析 <<<")
+    results = []
+
+    # 1. 统一测试负载 (使用真实请求流中的前 500 个)
+    TEST_LOAD = 500
+    # 确保环境使用真实数据集
+    env = DTEngineEnv(
+        network=dataset['network'],
+        users=dataset['users'],
+        task_chains=dataset['task_chains'],
+        total_reqs=TEST_LOAD
+    )
+
+    # 2. 定义要测试的模型权重组合
+    weights = [(0.9, 0.1), (0.7, 0.3), (0.5, 0.5), (0.3, 0.7), (0.1, 0.9)]
+
+    # 3. 逐一加载并评估 PPO 模型
+    logger.info("--- 正在评估 PPO 模型族 ---")
+    for a, b in weights:
+        # 模型存储的基础路径
+        model_path = os.path.join(PROJECT_ROOT, "environment", "models", "pareto_real", f"ppo_real_a{a}_b{b}")
+
+        if os.path.exists(model_path + ".zip"):
+            logger.info(f"正在评估权重 α={a} (偏向成本) 的模型...")
+            # 动态调整环境权重以匹配模型偏好
+            env.alpha, env.beta = a, b
+            agent = PPO.load(model_path, env=env)
+
+            # 使用之前的评估函数获取全量指标
+            m = evaluate_agent_full(f"PPO_a{a}", agent, env, TEST_LOAD)
+            m['Weight_Alpha'] = a
+            m['Method'] = 'PA-PPO'
+            results.append(m)
+        else:
+            logger.warning(f"跳过未找到的模型: {model_path}.zip")
+
+    # 4. 加入 Greedy 算法作为对比基准 (同样测试不同权重)
+    logger.info("--- 正在评估 Greedy 基准 ---")
+    for a, b in weights:
+        env.alpha, env.beta = a, b
+        agent = GreedyAgent(env)
+        m = evaluate_agent_full(f"Greedy_a{a}", agent, env, TEST_LOAD)
+        m['Weight_Alpha'] = a
+        m['Method'] = 'Greedy'
+        results.append(m)
+
+    # 5. 保存数据，为论文画图做准备
+    save_path = os.path.join(PROJECT_ROOT, "results", "exp_real_pareto_results.csv")
+    pd.DataFrame(results).to_csv(save_path, index=False)
+    logger.info(f"实验完成！结果已存至 {save_path}")
+
+    return results
+
+
+def run_baseline_comparison(dataset):
+    logger.info("\n" + "=" * 50)
+    logger.info(">>> 正在进行实验 2: 多算法基准对比 (全方位降维打击) <<<")
+    logger.info("=" * 50)
+
+    results = []
+    TEST_LOAD = 1000  # 使用 1000 个真实请求作为压力测试
+
+    # 🌟 核心设定：固定环境的随机种子！
+    # 这保证了无论哪个算法上场，用户的出现顺序、请求的类型都分毫不差，绝对公平。
+    TEST_SEED = 2026
+
+    # 初始化评估环境
+    env = DTEngineEnv(
+        network=dataset['network'],
+        users=dataset['users'],
+        task_chains=dataset['task_chains'],
+        total_reqs=TEST_LOAD,
+        seed=TEST_SEED
+    )
+
+    # ==========================================
+    # 选手 1: PA-PPO (均衡型主将)
+    # ==========================================
+    model_path = os.path.join(PROJECT_ROOT, "environment", "models", "pareto_real", "ppo_real_a0.5_b0.5")
+    if os.path.exists(model_path + ".zip"):
+        logger.info("\n[1/4] 正在评估 PA-PPO (均衡型 a=0.5, b=0.5)...")
+        env.alpha, env.beta = 0.5, 0.5
+        agent_ppo = PPO.load(model_path, env=env)
+
+        m_ppo = evaluate_agent_full("PA-PPO", agent_ppo, env, TEST_LOAD)
+        m_ppo['Algorithm'] = 'PA-PPO'
+        results.append(m_ppo)
+    else:
+        logger.error(f"找不到 PPO 模型: {model_path}.zip")
+
+    # ==========================================
+    # 选手 2: Greedy-Cost
+    # ==========================================
+    logger.info("\n[2/4] 正在评估 Greedy-Cost (追求极低成本)...")
+    # 权重设为 0.99，让环境在算分时极度放大 Cost 的影响
+    env.alpha, env.beta = 0.99, 0.01
+    # 确保重置环境，复原初始内存和相同的请求流
+    env.reset(seed=TEST_SEED)
+
+    agent_greedy_cost = GreedyAgent(env)
+    m_gc = evaluate_agent_full("Greedy-Cost", agent_greedy_cost, env, TEST_LOAD)
+    m_gc['Algorithm'] = 'Greedy-Cost'
+    results.append(m_gc)
+
+    # ==========================================
+    # 选手 3: Greedy-AoI
+    # ==========================================
+    logger.info("\n[3/4] 正在评估 Greedy-AoI (追求极低延迟)...")
+    # 权重设为 0.01，让环境在算分时极度放大 AoI 的影响
+    env.alpha, env.beta = 0.01, 0.99
+    env.reset(seed=TEST_SEED)
+
+    agent_greedy_aoi = GreedyAgent(env)
+    m_ga = evaluate_agent_full("Greedy-AoI", agent_greedy_aoi, env, TEST_LOAD)
+    m_ga['Algorithm'] = 'Greedy-AoI'
+    results.append(m_ga)
+
+
+    logger.info("\n[4/4] 正在评估 Random Baseline (性能下界)...")
+    env.alpha, env.beta = 0.5, 0.5  # 算分标准和 PPO 保持一致以便对比
+    env.reset(seed=TEST_SEED)
+
+    agent_random = RandomAgent(env)
+    m_rand = evaluate_agent_full("Random", agent_random, env, TEST_LOAD)
+    m_rand['Algorithm'] = 'Random'
+    results.append(m_rand)
+
+    save_path = os.path.join(PROJECT_ROOT, "results", "exp_baseline_comparison.csv")
+    pd.DataFrame(results).to_csv(save_path, index=False)
+
+    logger.info("\n" + "=" * 50)
+    logger.info(f"实验 2 完成！四种算法对比数据已存储至: {save_path}")
+    logger.info("=" * 50)
+
+    return results
+
+
+def run_timeseries_stress_test(dataset):
+    logger.info("\n" + "=" * 50)
+    logger.info(">>> 正在进行实验 3: 时序抗压与动态响应分析 <<<")
+    logger.info("=" * 50)
+
+    # 使用较长的请求流观察波动
+    TEST_LOAD = 800
+    TEST_SEED = 2026
+
+    # 我们对比两个核心选手
+    algorithms = ["PA-PPO", "Greedy"]
+    time_series_data = []
+
+    for algo in algorithms:
+        logger.info(f"正在追踪 {algo} 的实时动态响应...")
+        env = DTEngineEnv(
+            network=dataset['network'],
+            users=dataset['users'],
+            task_chains=dataset['task_chains'],
+            total_reqs=TEST_LOAD,
+            seed=TEST_SEED
+        )
+
+        # 加载对应的智能体
+        if algo == "PA-PPO":
+            model_path = os.path.join(PROJECT_ROOT, "environment", "models", "pareto_real", "ppo_real_a0.5_b0.5")
+            agent = PPO.load(model_path, env=env)
+        else:
+            agent = GreedyAgent(env)
+
+        obs, info = env.reset()
+
+        for step in range(TEST_LOAD):
+            action, _ = agent.predict(obs, deterministic=True)
+            obs, reward, terminated, truncated, info = env.step(action)
+
+            # 核心：记录每一个时间步的瞬时指标
+            # 我们记录：请求ID、瞬时AoI、瞬时成本、以及系统的总剩余内存（代表压力）
+            total_remaining_mem = sum([node.memory for node in env.network.get_edge_nodes()])
+
+            time_series_data.append({
+                'Step': step,
+                'Algorithm': algo,
+                'Instant_AoI': info.get('aoi', 0) if info.get('cost') != float('inf') else 200,  # 崩溃赋予高惩罚值
+                'Instant_Cost': info.get('cost', 0) if info.get('cost') != float('inf') else 50,
+                'System_Free_Mem': total_remaining_mem,
+                'Is_Success': 1 if info.get('cost') != float('inf') else 0
+            })
+
+            if terminated or truncated:
+                break
+
+    # 保存时序数据
+    save_path = os.path.join(PROJECT_ROOT, "results", "exp_timeseries_stress.csv")
+    pd.DataFrame(time_series_data).to_csv(save_path, index=False)
+    logger.info(f"动态响应数据已保存至: {save_path}")
+    return time_series_data
+
+
+def generate_spatial_heatmap_data(dataset):
+    logger.info("\n" + "=" * 50)
+    logger.info(">>> 正在进行实验 4: 收集空间部署热力数据 <<<")
+
+    env = DTEngineEnv(
+        network=dataset['network'],
+        users=dataset['users'],
+        task_chains=dataset['task_chains'],
+        total_reqs=500,  # 跑 500 个请求看分布
+        seed=2026
+    )
+
+    # 找一个优秀的 PPO 模型来展示它的“排兵布阵”
+    model_path = os.path.join(PROJECT_ROOT, "environment", "models", "pareto_real", "ppo_real_a0.5_b0.5")
+    agent = PPO.load(model_path, env=env)
+
+    obs, info = env.reset()
+
+    # 用一个字典来记录每个基站 (EdgeNode) 接收了多少次 DT 部署
+    deployment_counts = defaultdict(int)
+
+    # 获取所有的 EdgeNode 列表，方便通过 action (索引) 找回真实的基站对象
+    edge_nodes = [data.get('node') for n, data in env.network.graph.nodes(data=True)
+                  if type(data.get('node')).__name__ == 'EdgeNode']
+
+    for step in range(500):
+        action, _ = agent.predict(obs, deterministic=True)
+        obs, reward, terminated, truncated, info = env.step(action)
+
+        # 只要没有崩溃 (Cost != inf)，就记录这次部署落在了哪个基站上
+        if info.get('cost') != float('inf'):
+            target_en = edge_nodes[action]
+            deployment_counts[target_en.id] += 1
+
+        if terminated or truncated:
+            break
+
+    # 将统计数据转化为 DataFrame 并附上经纬度
+    heatmap_data = []
+    for en in edge_nodes:
+        count = deployment_counts.get(en.id, 0)
+        heatmap_data.append({
+            'Node_ID': en.id,
+            'Latitude': en.lat,
+            'Longitude': en.lon,
+            'Load_Count': count
+        })
+
+    df = pd.DataFrame(heatmap_data)
+    save_path = os.path.join(PROJECT_ROOT, "results", "exp_heatmap_data.csv")
+    df.to_csv(save_path, index=False)
+    logger.info(f"热力分布数据已保存至: {save_path}")
+
+    return df
+
+
 if __name__ == "__main__":
+    # === 随机数据集 ===
     # 确保根目录下有 results 文件夹
+    # os.makedirs(os.path.join(PROJECT_ROOT, "results"), exist_ok=True)
+    #
+    # base_dataset_path = os.path.join(PROJECT_ROOT, "data", "dataset_large.pkl")
+    # base_dataset = load_dataset(base_dataset_path)
+    #
+    # run_exp_load_sensitivity(base_dataset)
+    # run_exp_scalability()
+    # run_exp_pareto_tradeoff(base_dataset)
+
+    # === 真实数据集 ===
     os.makedirs(os.path.join(PROJECT_ROOT, "results"), exist_ok=True)
 
-    base_dataset_path = os.path.join(PROJECT_ROOT, "data", "dataset_large.pkl")
-    base_dataset = load_dataset(base_dataset_path)
+    real_dataset_path = os.path.join(PROJECT_ROOT, "data", "dataset_real_30.pkl")
+    real_dataset = load_dataset(real_dataset_path)
 
-    run_exp_load_sensitivity(base_dataset)
-    run_exp_scalability()
-    run_exp_pareto_tradeoff(base_dataset)
+    # run_real_world_pareto_analysis(real_dataset)
+    # run_baseline_comparison(real_dataset)
+    run_timeseries_stress_test(real_dataset)
+    generate_spatial_heatmap_data(real_dataset)
 
     logger.info("\n恭喜！所有实验数据已全部采出，准备画图。")

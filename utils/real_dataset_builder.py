@@ -24,11 +24,6 @@ def associate_user_to_ap(user_node, lat, lon, edge_nodes, net):
     user_node.lat = lat
     user_node.lon = lon
 
-    # 先清理该用户旧的接入链路 (模拟移动过程中的 AP 切换)
-    # edges_to_remove = [e for e in net.edges if e.target_node == user_node or e.source_node == user_node]
-    # for e in edges_to_remove:
-    #     net.remove_edge(e)
-
     # 寻找当前最近的基站
     min_dist = float('inf')
     nearest_en = None
@@ -117,9 +112,29 @@ def build_real_dataset(telecom_path: str, alibaba_path: str,
     min_lat, max_lat = min(lats), max(lats)
     min_lon, max_lon = min(lons), max(lons)
 
+    # 30.823953 - 31.4768416
+    # 120.970188 - 121.922883
     for i in range(num_sensors):
-        s_lat = random.uniform(min_lat, max_lat)
-        s_lon = random.uniform(min_lon, max_lon)
+        # s_lat = random.uniform(30.823953, 31.4768416)
+        # s_lon = random.uniform(120.970188, 121.922883)
+        # s_lat = random.uniform(min_lat, max_lat)
+        # s_lon = random.uniform(min_lon, max_lon)
+        cov = [[(max_lat - min_lat) / 6, 0],
+               [0, (max_lon - min_lon) / 6]]
+        center_lat = (min_lat + max_lat) / 2
+        center_lon = (min_lon + max_lon) / 2
+
+        while True:
+            s_lat, s_lon = np.random.multivariate_normal(
+                [center_lat, center_lon], cov
+            )
+
+            if min_lat <= s_lat <= max_lat and min_lon <= s_lon <= max_lon:
+                break
+
+        # s_lat, s_lon = np.random.multivariate_normal(
+        #     [center_lat, center_lon], cov
+        # )
         data_size = random.uniform(1.0, 5.0)
 
         sensor = Sensor(id=f"Sensor_{i}", data_size=data_size)
@@ -225,6 +240,8 @@ def build_real_dataset(telecom_path: str, alibaba_path: str,
     # ==========================================
     dataset = {
         'network': net,
+        'edge_nodes': edge_nodes,
+        'sensors': sensors,
         'users': list(users_dict.values()),
         'task_chains': task_chains,
         'request_stream': request_stream,

@@ -3,6 +3,7 @@ import os
 import sys
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 from pathlib import Path
 
 # 定位项目根目录
@@ -134,9 +135,166 @@ def plot_pareto():
     plt.show()
 
 
+# ==========================================
+# 战役一：帕累托前沿折线散点图 (Pareto Front)
+# ==========================================
+def plot_pareto_front():
+    csv_path = os.path.join(PROJECT_ROOT, "results", "exp_real_pareto_results.csv")
+    if not os.path.exists(csv_path):
+        print(f"找不到数据文件: {csv_path}")
+        return
+
+    df = pd.read_csv(csv_path)
+
+    plt.figure(figsize=(8, 6), dpi=300)
+
+    # 按照成本从小到大排序，保证折线不打结
+    df_ppo = df[df['Method'] == 'PA-PPO'].sort_values('Avg_Cost')
+    df_greedy = df[df['Method'] == 'Greedy'].sort_values('Avg_Cost')
+
+    # 绘制折线和散点
+    plt.plot(df_ppo['Avg_Cost'], df_ppo['Avg_AoI'], marker='o', markersize=10,
+             linewidth=2.5, color='#e74c3c', label='PA-PPO (Ours)')
+    plt.plot(df_greedy['Avg_Cost'], df_greedy['Avg_AoI'], marker='s', markersize=8,
+             linewidth=2, color='#95a5a6', linestyle='--', label='Greedy Baseline')
+
+    # 为 PPO 的点添加权重标注 (Alpha 值)
+    for i, row in df_ppo.iterrows():
+        plt.annotate(f"α={row['Weight_Alpha']}",
+                     (row['Avg_Cost'], row['Avg_AoI']),
+                     textcoords="offset points", xytext=(10, 10), ha='left', fontsize=10)
+
+    plt.title('Pareto Front: System Cost vs. Information Freshness (AoI)', fontsize=16, pad=15, fontweight='bold')
+    plt.xlabel('Average System Cost (Lower is better)', fontsize=14)
+    plt.ylabel('Average AoI (Lower is better)', fontsize=14)
+    plt.legend(fontsize=12, loc='upper right')
+
+    # 越靠近左下角性能越好，画个箭头提示
+    plt.annotate('Better Performance', xy=(0.05, 0.05), xycoords='axes fraction',
+                 xytext=(0.3, 0.2), arrowprops=dict(facecolor='black', shrink=0.05, width=1.5, headwidth=8),
+                 fontsize=12, fontweight='bold', color='#2c3e50')
+
+    save_path = os.path.join(PROJECT_ROOT, "results", "plot_pareto_front.png")
+    plt.tight_layout()
+    plt.savefig(save_path)
+    print(f"帕累托前沿图已保存至: {save_path}")
+    plt.show()
+
+
+# ==========================================
+# 战役二：基准算法全方位对比 (Bar Charts 1x3)
+# ==========================================
+def plot_baseline_comparison():
+    csv_path = os.path.join(PROJECT_ROOT, "results", "exp_baseline_comparison.csv")
+    if not os.path.exists(csv_path):
+        print(f"找不到数据文件: {csv_path}")
+        return
+
+    df = pd.read_csv(csv_path)
+
+    # 创建 1x3 的并排子图
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5), dpi=300)
+
+    # 自定义颜色，突出 PPO
+    colors = ['#e74c3c' if algo == 'PA-PPO' else '#3498db' for algo in df['Algorithm']]
+
+    # 1. 成功率对比 (越高越好)
+    sns.barplot(x='Algorithm', y='Success_Rate', data=df, ax=axes[0], palette=colors)
+    axes[0].set_title('(a) Request Success Rate ↑', fontsize=14, fontweight='bold')
+    axes[0].set_ylabel('Success Rate (%)')
+    axes[0].set_ylim(0, 100)
+
+    # 2. 平均 AoI 对比 (越低越好)
+    sns.barplot(x='Algorithm', y='Avg_AoI', data=df, ax=axes[1], palette=colors)
+    axes[1].set_title('(b) Average AoI ↓', fontsize=14, fontweight='bold')
+    axes[1].set_ylabel('Age of Information (ms/s)')
+
+    # 3. 平均成本对比 (越低越好)
+    sns.barplot(x='Algorithm', y='Avg_Cost', data=df, ax=axes[2], palette=colors)
+    axes[2].set_title('(c) Average Deployment Cost ↓', fontsize=14, fontweight='bold')
+    axes[2].set_ylabel('Cost Units')
+
+    # 美化 X 轴标签
+    for ax in axes:
+        ax.set_xlabel('')
+        ax.tick_params(axis='x', rotation=15, labelsize=12)
+
+    plt.suptitle('Performance Comparison Across Different Algorithms', fontsize=18, fontweight='bold', y=1.05)
+
+    save_path = os.path.join(PROJECT_ROOT, "results", "plot_baseline_comparison.png")
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches='tight')
+    print(f"基准对比图已保存至: {save_path}")
+    plt.show()
+
+
+# ==========================================
+# 战役三：时序动态响应与抗压分析 (Smoothed Line Plot)
+# ==========================================
+def plot_timeseries_analysis():
+    csv_path = os.path.join(PROJECT_ROOT, "results", "exp_timeseries_stress.csv")
+    if not os.path.exists(csv_path):
+        print(f"找不到数据文件: {csv_path}")
+        return
+
+    df = pd.read_csv(csv_path)
+
+    plt.figure(figsize=(12, 6), dpi=300)
+
+    # 原始数据是 step 级别的，会有剧烈的毛刺。
+    # 论文中为了看清趋势，通常使用滑动平均 (Rolling Mean) 进行平滑处理。
+    window_size = 20
+
+    df_ppo = df[df['Algorithm'] == 'PA-PPO'].copy()
+    df_greedy = df[df['Algorithm'] == 'Greedy'].copy()
+
+    df_ppo['Smoothed_AoI'] = df_ppo['Instant_AoI'].rolling(window=window_size, min_periods=1).mean()
+    df_greedy['Smoothed_AoI'] = df_greedy['Instant_AoI'].rolling(window=window_size, min_periods=1).mean()
+
+    # 绘制平滑后的 AoI 曲线
+    plt.plot(df_ppo['Step'], df_ppo['Smoothed_AoI'], label='PA-PPO (Smoothed)',
+             linewidth=2.5, color='#e74c3c')
+    plt.plot(df_greedy['Step'], df_greedy['Smoothed_AoI'], label='Greedy (Smoothed)',
+             linewidth=2, color='#34495e', linestyle='--')
+
+    # 添加半透明的置信带 (展示原始数据的波动范围)
+    plt.fill_between(df_ppo['Step'],
+                     df_ppo['Smoothed_AoI'] - df_ppo['Instant_AoI'].rolling(window_size).std(),
+                     df_ppo['Smoothed_AoI'] + df_ppo['Instant_AoI'].rolling(window_size).std(),
+                     color='#e74c3c', alpha=0.15)
+
+    plt.fill_between(df_greedy['Step'],
+                     df_greedy['Smoothed_AoI'] - df_greedy['Instant_AoI'].rolling(window_size).std(),
+                     df_greedy['Smoothed_AoI'] + df_greedy['Instant_AoI'].rolling(window_size).std(),
+                     color='#34495e', alpha=0.1)
+
+    # 标注流量突发区 (假设在 300-500 步之间发生拥塞，可根据真实数据调整阴影位置)
+    plt.axvspan(300, 500, color='yellow', alpha=0.15, label='High Traffic Burst Area')
+
+    plt.title('Dynamic AoI Response under Real-world Traffic Fluctuations', fontsize=16, pad=15, fontweight='bold')
+    plt.xlabel('Request Sequence (Time Step)', fontsize=14)
+    plt.ylabel('Instantaneous AoI (Smoothed)', fontsize=14)
+
+    # 将图例放在外侧防遮挡
+    plt.legend(fontsize=12, loc='upper left', bbox_to_anchor=(1, 1))
+
+    save_path = os.path.join(PROJECT_ROOT, "results", "plot_timeseries_stress.png")
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches='tight')
+    print(f"时序动态响应图已保存至: {save_path}")
+    plt.show()
+
+
 if __name__ == "__main__":
     print("正在生成实验图表...")
-    plot_load_sensitivity()
-    plot_scalability()
-    plot_pareto()
+    # === 随机数据 ===
+    # plot_load_sensitivity()
+    # plot_scalability()
+    # plot_pareto()
+
+    # === 真实数据 ===
+    plot_pareto_front()
+    plot_baseline_comparison()
+    plot_timeseries_analysis()
+
     print("图表已全部生成并保存在 results/ 目录下！")

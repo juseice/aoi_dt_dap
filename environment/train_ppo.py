@@ -7,16 +7,21 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import BaseCallback
 from utils.logger import logger
 from utils.visualization import plot_simulation_results
-
+from pathlib import Path
+from stable_baselines3.common.vec_env import SubprocVecEnv
+import multiprocessing
+from tqdm import tqdm
 
 from environment.rl_env import DTEngineEnv
 from main import setup_clean_environment  # 暂用建图
 from utils.data_generator import load_dataset
 
+PROJECT_ROOT = str(Path(__file__).resolve().parents[1])
 
 # ==========================================
 # 训练过程数据记录器 (用于论文 6.4.1 画收敛图)
 # ==========================================
+
 class ConvergenceLoggerCallback(BaseCallback):
     def __init__(self, model_name, verbose=0):
         super().__init__(verbose)
@@ -36,14 +41,68 @@ class ConvergenceLoggerCallback(BaseCallback):
 
     def _on_training_end(self) -> None:
         # 训练结束后，将收敛数据落盘为 CSV
-        os.makedirs("results/training_logs", exist_ok=True)
+        log_dir = os.path.join(PROJECT_ROOT, "results", "training_logs")
+        os.makedirs(log_dir, exist_ok=True)
+
         df = pd.DataFrame({
             'Episode': range(1, len(self.episode_rewards) + 1),
             'Cumulative_Reward': self.episode_rewards
         })
-        csv_path = f"results/training_logs/{self.model_name}_convergence.csv"
+        csv_path = os.path.join(log_dir, f"{self.model_name}_convergence.csv")
         df.to_csv(csv_path, index=False)
         logger.info(f"模型 {self.model_name} 的收敛数据已保存至 {csv_path}")
+
+
+def train_real_world_pareto():
+    logger.info("开始基于真实数据分布训练帕累托模型矩阵...")
+
+    dataset_path = os.path.join(PROJECT_ROOT, "data", "dataset_real_30.pkl")
+    if not os.path.exists(dataset_path):
+        logger.error("找不到真实数据集文件，请先运行 generate_real_datasets.py")
+        return
+
+    dataset = load_dataset(dataset_path)
+
+    # 真实数据环境下，增加训练步数
+    TOTAL_TIMESTEPS = 50000
+    TRAIN_REQS_PER_EPISODE = 500
+
+    # 帕累托权重组合
+    pareto_weights = [(0.9, 0.1), (0.7, 0.3), (0.5, 0.5), (0.3, 0.7), (0.1, 0.9)]
+    num_cpus = min(8, multiprocessing.cpu_count())
+    logger.info(f"开启 CPU 多进程加速，同时运行 {num_cpus} 个平行仿真环境！")
+
+    # 创建保存目录
+    model_dir = os.path.join(PROJECT_ROOT, "environment", "models", "pareto_real")
+    os.makedirs(model_dir, exist_ok=True)
+
+    for alpha, beta in tqdm(pareto_weights, desc="总体模型训练进度", colour="green"):
+        model_name = f"ppo_real_a{alpha}_b{beta}"
+        logger.info(f"\n>>> 正在训练真实数据模型: {model_name} (α={alpha}, β={beta}) <<<")
+
+        # 使用真实数据集的物理网络、用户、任务链
+        env_maker = lambda: DTEngineEnv(
+            network=dataset['network'],
+            users=dataset['users'],
+            task_chains=dataset['task_chains'],
+            request_stream=None,  # 训练时使用随机抽样
+            total_reqs=TRAIN_REQS_PER_EPISODE,
+            seed=None,
+            alpha=alpha,
+            beta=beta
+        )
+
+        vec_env = make_vec_env(env_maker, n_envs=num_cpus, vec_env_cls=SubprocVecEnv)
+
+        model = PPO("MlpPolicy", vec_env, verbose=0, learning_rate=3e-4)
+        model.learn(total_timesteps=TOTAL_TIMESTEPS, progress_bar=True)
+
+        # 保存模型
+        save_path = os.path.join(model_dir, model_name)
+        model.save(save_path)
+        logger.info(f"模型已保存至: {save_path}.zip")
+
+    logger.info("\n真实数据帕累托模型完毕！")
 
 
 def train_pareto_models():
@@ -52,7 +111,8 @@ def train_pareto_models():
     logger.info("=" * 50)
 
     # 1. 加载数据集
-    dataset = load_dataset("../data/dataset_large.pkl")
+    dataset_path = os.path.join(PROJECT_ROOT, "data", "dataset_large.pkl")
+    dataset = load_dataset(dataset_path)
 
     net = dataset['network']
     users = dataset['users']
@@ -60,7 +120,7 @@ def train_pareto_models():
 
     # 训练参数
     TRAIN_REQS_PER_EPISODE = 500  # 让每回合足够长，让智能体吃尽苦头去学习
-    TOTAL_TIMESTEPS = 50000       # 每个模型的总训练步数 (如果算力够，可设为 100000)
+    TOTAL_TIMESTEPS = 80000       # 每个模型的总训练步数 (如果算力够，可设为 100000)
 
     # 2. 设定我们要探索的权重组合 (alpha: 成本权重, beta: AoI 权重)
     pareto_weights = [
@@ -71,7 +131,12 @@ def train_pareto_models():
         (0.1, 0.9)  # 极端偏好：新鲜度 (AoI 优先)
     ]
 
-    os.makedirs("models/pareto", exist_ok=True)
+    pareto_weights = [
+        (0.9, 0.1), (0.7, 0.3), (0.5, 0.5), (0.3, 0.7), (0.1, 0.9)
+    ]
+
+    model_dir = os.path.join(PROJECT_ROOT, "environment", "models", "pareto")
+    os.makedirs(model_dir, exist_ok=True)
 
     # 3. 开始循环炼丹
     for alpha, beta in pareto_weights:
@@ -93,10 +158,9 @@ def train_pareto_models():
         vec_env = make_vec_env(env_maker, n_envs=1)
 
         # 构建 PPO 模型
-        model = PPO("MlpPolicy", vec_env, verbose=0, learning_rate=3e-4,
-                    tensorboard_log=f"./tensorboard_logs/{model_name}/")
+        tb_log = os.path.join(PROJECT_ROOT, "results", "tensorboard_logs", model_name)
+        model = PPO("MlpPolicy", vec_env, verbose=0, learning_rate=3e-4, tensorboard_log=tb_log)
 
-        # 挂载记录器并开始训练
         callback = ConvergenceLoggerCallback(model_name=model_name)
         model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=callback)
 
@@ -124,8 +188,7 @@ def train_scalability_models():
         logger.info(f"\n>>> 正在训练 {n} 节点规模的专属模型: {model_name} <<<")
 
         # 1. 加载对应规模的真实拓扑数据集
-        # (确保你已经用生成脚本生成了 dataset_10_nodes.pkl 等文件)
-        dataset_path = f"../data/dataset_{n}_nodes.pkl"
+        dataset_path = os.path.join(PROJECT_ROOT, "data", f"dataset_{n}_nodes.pkl")
         if not os.path.exists(dataset_path):
             logger.error(f"找不到数据集 {dataset_path}，请先生成！")
             continue
@@ -249,5 +312,8 @@ def train_and_evaluate_ppo():
 
 
 if __name__ == "__main__":
-    train_pareto_models()
+    train_real_world_pareto()
+    # train_pareto_models()
+    # train_scalability_models()
+    # train_and_evaluate_ppo()
 
