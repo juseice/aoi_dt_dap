@@ -10,7 +10,7 @@ from latency.queue import compute_queue_delay
 
 
 class Simulator:
-    def __init__(self, network, dt_ttl=25.0):
+    def __init__(self, network, dt_ttl=10.0):
         self.network = network
         self.dt_ttl = dt_ttl
         self.node_available_time = {node.id: 0.0 for node in network.get_edge_nodes()}

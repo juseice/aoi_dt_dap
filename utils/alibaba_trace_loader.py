@@ -41,7 +41,7 @@ class AlibabaTraceLoader:
 
         # 3. 边缘化缩放 (Edge Scaling)
         # 将数据中心的庞大需求等比例缩放，映射为边缘计算级别的微服务需求
-        self.df['edge_cpu'] = self.df['cpu_request'] * self.edge_scale_factor
+        self.df['edge_cpu'] = self.df['cpu_request']
         self.df['edge_mem'] = self.df['memory_request'] * self.edge_scale_factor
 
         logger.info(f"数据集清洗完成。有效记录数: {len(self.df)} / {initial_len}")
@@ -59,8 +59,7 @@ class AlibabaTraceLoader:
 
         tasks_info = []
         for _, row in sampled.iterrows():
-            # 假设 1 个缩放后的 vCPU 对应 2.0 的 workload 算力需求
-            workload = row['edge_cpu'] * 2.0
+            workload = row['edge_cpu']
             memory = row['edge_mem']
             duration = row['duration']
 

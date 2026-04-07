@@ -243,7 +243,10 @@ def build_real_dataset(telecom_path: str, alibaba_path: str,
     base_time = df_requests['start time'].iloc[0]
     df_requests['relative_time'] = (df_requests['start time'] - base_time).dt.total_seconds()
 
-    # 提前计算 Zipf 分布概率，用于分配请求的目标 DT
+    actual_duration = df_requests['relative_time'].max()
+    logger.info(f"-> 成功提取 {total_requests} 个请求，真实时间跨度为: {actual_duration / 60:.1f} 分钟")
+
+    # 提前计算 Zipf 分布概率
     zipf_probs = 1.0 / np.power(np.arange(1, num_dts + 1), 0.8)
     zipf_probs /= np.sum(zipf_probs)
 

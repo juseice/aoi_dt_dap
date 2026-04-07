@@ -10,7 +10,7 @@ from utils.logger import logger
 # 导入我们封装好的各类 Agent
 from algorithms.random_agent import RandomAgent
 from algorithms.greedy_agent import GreedyAgent
-from algorithms.dp_agent import DPAgent  # (建议你把 DP 也封装成类，详见后文解释)
+from algorithms.dp_agent import DPAgent
 
 
 def evaluate_agent(algo_name, agent, env, seed):

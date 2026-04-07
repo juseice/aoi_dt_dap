@@ -1,5 +1,6 @@
 # utils/generate_real_datasets.py
 import os
+import random
 import sys
 import pandas as pd
 from pathlib import Path
@@ -42,23 +43,23 @@ def export_geo_to_csv(dataset, save_dir):
         logger.warning("数据集中没有发现带有经纬度属性的节点！")
 
 
-def generate_real_world_data():
+def generate_real_world_data(num_edge_nodes=30, total_requests=2000):
     # 1. 配置文件路径 (请确保这些文件在你的电脑上路径正确)
     telecom_file = os.path.join(PROJECT_ROOT, "datasets", "telecom-shanghai-dataset", "data_10.1610.31.xlsx")
     alibaba_file = os.path.join(PROJECT_ROOT, "datasets", "cluster-trace-gpu-v2025", "disaggregated_DLRM_trace.csv")
 
     os.makedirs(os.path.join(PROJECT_ROOT, "data"), exist_ok=True)
 
-    logger.info(">>> 正在基于真实轨迹构建大规模训练集 (30 节点, 1000 请求)...")
+    logger.info(f">>> 正在基于真实轨迹构建大规模训练集 ({num_edge_nodes} 节点, {total_requests} 请求)...")
 
     # 构建一个中等规模的真实数据集用于训练
     real_ds_train = build_real_dataset(
         telecom_path=telecom_file,
         alibaba_path=alibaba_file,
-        num_edge_nodes=30,
+        num_edge_nodes=num_edge_nodes,
         num_dts=15,
         num_sensors=20,
-        total_requests=1000,
+        total_requests=total_requests,
         seed=2026
     )
 

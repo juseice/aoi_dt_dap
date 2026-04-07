@@ -73,13 +73,58 @@ class DTEngineEnv(gym.Env):
 
         # 预先提取网络中的全局最强属性，用于计算公式(8)的理论极限
         self.max_compute = max([n.compute_power for n in self.edge_nodes])
+        self.min_compute = min([n.compute_power for n in self.edge_nodes])
         self.min_cost = min([n.cost for n in self.edge_nodes])
+        self.max_cost = max([n.cost for n in self.edge_nodes])
 
-        # 获取全网最大带宽
         all_edges = []
         for u, v, data in self.network.graph.edges(data=True):
             all_edges.append(data['edge'].bandwidth)
         self.max_bandwidth = max(all_edges) if all_edges else 10.0
+        self.min_bandwidth = min(all_edges) if all_edges else 1.0
+
+        self._calculate_global_bounds()
+
+    def _calculate_global_bounds(self):
+        """
+        基于物理网络的异构性，动态计算 AoI 和 Cost 的理论上下界。
+        用于后续的 Min-Max 归一化。
+        """
+        # 1. 寻找极端任务量
+        max_workload = max([sum(t.workload for t in tc.tasks) for tc in self.task_chains])
+        min_workload = min([sum(t.workload for t in tc.tasks) for tc in self.task_chains])
+
+        # 寻找极端的迁移代价
+        max_mig_cost = max([sum(t.deployment_cost for t in tc.tasks) for tc in self.task_chains])
+
+        # 寻找极端的传感器数据量
+        max_data_size = max([self.network.get_node(tc.sensor_id).data_size for tc in self.task_chains])
+
+        # ---------------------------
+        # Cost 的上下界
+        # ---------------------------
+        # 最小代价：最便宜节点 + 最小任务 + 不发生迁移
+        self.min_env_cost = self.min_cost * (min_workload / self.max_compute)
+
+        # 最大代价：最贵节点 + 最大任务 + 发生整体迁移
+        self.max_env_cost = (self.max_cost * (max_workload / self.min_compute)) + max_mig_cost
+
+        # ---------------------------
+        # AoI 的上下界
+        # ---------------------------
+        self.min_env_aoi = 0.0  # 理论极限下限可以设为0
+
+        # 理论最大 AoI 估算：
+        # 最差传感传输 + 最慢节点计算 + 极端排队阻塞 (假设前面堵了 5 个大任务) + 最慢结果回传
+        worst_sense = max_data_size / self.min_bandwidth
+        worst_comp = max_workload / self.min_compute
+        worst_queue = worst_comp * 5.0  # RL 探索时可能会引发拥塞，给予一定冗余空间
+        worst_res = 1.0 / self.min_bandwidth
+
+        self.max_env_aoi = worst_sense + worst_comp + worst_queue + worst_res
+
+        logger.info(
+            f"[RL Env Bounds] AoI Range: [0, {self.max_env_aoi:.2f}], Cost Range: [{self.min_env_cost:.2f}, {self.max_env_cost:.2f}]")
 
     def _compute_lower_bound(self, req):
         """
@@ -167,6 +212,7 @@ class DTEngineEnv(gym.Env):
         for node in self.edge_nodes:
             node.available_memory = getattr(node, 'memory', 10.0)
 
+        # dt_ttl = 10.0 智能城市服务
         self.simulator = Simulator(self.network, dt_ttl=10.0)
         if self.fixed_request_stream is not None:
             self.request_stream = self.fixed_request_stream
@@ -201,38 +247,32 @@ class DTEngineEnv(gym.Env):
             aoi = estimate_aoi(real_sense, real_queue, real_comp, real_res)
             cost = compute_cost(target_node, real_comp, req.task_chain, real_mig)
 
-            # Reward
-            lb_j = self._compute_lower_bound(req)
-            actual_obj = max(self.alpha * cost + self.beta * aoi, 1e-5)
+            # Reward (LB version)
+            # lb_j = self._compute_lower_bound(req)
+            # actual_obj = max(self.alpha * cost + self.beta * aoi, 1e-5)
+            #
+            # # rt = Z * LB / (alpha*C + beta*D) + R_finish
+            # reward = (self.Z * lb_j) / actual_obj + self.R_finish
+            # success = True
 
-            # rt = Z * LB / (alpha*C + beta*D) + R_finish
-            reward = (self.Z * lb_j) / actual_obj + self.R_finish
+            # normalize version
+            norm_aoi = float(np.clip((aoi - self.min_env_aoi) / (self.max_env_aoi - self.min_env_aoi + 1e-8), 0.0, 1.0))
+            norm_cost = float(
+                np.clip((cost - self.min_env_cost) / (self.max_env_cost - self.min_env_cost + 1e-8), 0.0, 1.0))
+
+            joint_cost = self.alpha * norm_aoi + self.beta * norm_cost
+
+            # 线性奖励：越接近理论下限，cost越接近0，reward越接近 1.0
+            # 加上完成奖励 R_finish
+            reward = (1.0 - joint_cost) * self.Z + self.R_finish
             success = True
 
         except RuntimeError as e:
-            # 【约束惩罚】：如果智能体选了一个内存不够的节点，物理机崩溃
-            # 给予极大的负惩罚，并可以选择提前结束这一回合
-            # reward = self.R_penalty
-            # aoi, cost = float('inf'), float('inf')
-            # real_sense, real_queue, real_comp, real_res, real_mig = \
-            #     float('inf'), float('inf'), float('inf'), float('inf'), float('inf')
-            # # 保证状态流转
-            # fallback_node = None
-            # for n in self.edge_nodes:
-            #     if n.available_memory >= sum(t.memory_requirement for t in req.task_chain.tasks):
-            #         fallback_node = n
-            #         break
-            # if fallback_node:
-            #     # 推进时间轴
-            #     self.simulator.commit_step(fallback_node, req.task_chain, req.user, req.time)
-            # else:
-            #     # terminated = True
-            #     pass
             reward = self.R_penalty
             aoi, cost = float('inf'), float('inf')
             real_mig = False
             success = False
-            # 此时我们不再寻找 fallback_node，物理时间会在下一个请求到来时自然推进
+            norm_aoi, norm_cost = 1.0, 1.0
 
         # 3. 推进时间，获取下一个请求
         self.current_step += 1

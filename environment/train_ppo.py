@@ -111,7 +111,7 @@ def train_pareto_models():
     logger.info("=" * 50)
 
     # 1. 加载数据集
-    dataset_path = os.path.join(PROJECT_ROOT, "data", "dataset_large.pkl")
+    dataset_path = os.path.join(PROJECT_ROOT, "data", "dataset_debug.pkl")
     dataset = load_dataset(dataset_path)
 
     net = dataset['network']
@@ -140,7 +140,7 @@ def train_pareto_models():
 
     # 3. 开始循环炼丹
     for alpha, beta in pareto_weights:
-        model_name = f"ppo_a{alpha}_b{beta}_large"
+        model_name = f"ppo_a{alpha}_b{beta}_debug"
         logger.info(f"\n>>> 正在训练模型: {model_name} (Cost权={alpha}, AoI权={beta}) <<<")
 
         # 动态实例化带有特定权重的 Env
@@ -312,8 +312,8 @@ def train_and_evaluate_ppo():
 
 
 if __name__ == "__main__":
-    train_real_world_pareto()
+    # train_real_world_pareto()
     # train_pareto_models()
     # train_scalability_models()
-    # train_and_evaluate_ppo()
+    train_and_evaluate_ppo()
 
