@@ -83,11 +83,11 @@ def build_real_dataset(telecom_path: str, alibaba_path: str,
         # 异构节点生成：随机分配 3 个梯队的算力和内存 (20%强，60%中，20%弱)
         tier = np.random.choice([0, 1, 2], p=[0.2, 0.6, 0.2])
         if tier == 0:
-            cp, mem, cost = 8.0, 128.0, 10.0  # 大型核心边缘机房
+            cp, mem, cost = 8.0, 192.0, 10.0  # 大型核心边缘机房
         elif tier == 1:
-            cp, mem, cost = 4.0, 64.0, 5.0  # 中型汇聚节点
+            cp, mem, cost = 4.0, 80.0, 5.0  # 中型汇聚节点
         else:
-            cp, mem, cost = 1.6, 32.0, 2.0  # 小型接入基站
+            cp, mem, cost = 1.6, 48.0, 2.0  # 小型接入基站
 
         en = EdgeNode(id=f"EN_{i}", compute_power=cp, cost=cost, memory=mem)
         en.lat, en.lon = loc[0], loc[1]

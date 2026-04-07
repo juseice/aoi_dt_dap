@@ -74,7 +74,7 @@ def plot_load_sensitivity():
     fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, 1.05), ncol=len(labels), frameon=False)
     plt.tight_layout()
     plt.subplots_adjust(top=0.85)
-    plt.savefig(os.path.join(RESULTS_DIR, "fig_load_sensitivity.png"), bbox_inches='tight')
+    plt.savefig(os.path.join(RESULTS_DIR, "fig_load_sensitivity.png"), bbox_inches='tight', format="pdf")
     plt.show()
 
 
@@ -106,7 +106,7 @@ def plot_scalability():
     ax_time.legend()
 
     plt.tight_layout()
-    plt.savefig(os.path.join(RESULTS_DIR, "fig_scalability.png"), bbox_inches='tight')
+    plt.savefig(os.path.join(RESULTS_DIR, "fig_scalability.png"), bbox_inches='tight', format="pdf")
     plt.show()
 
 
@@ -144,7 +144,7 @@ def plot_pareto():
     ax.legend()
 
     plt.tight_layout()
-    plt.savefig(os.path.join(RESULTS_DIR, "fig_pareto.png"), bbox_inches='tight')
+    plt.savefig(os.path.join(RESULTS_DIR, "fig_pareto.png"), bbox_inches='tight', format="pdf")
     plt.show()
 
 
@@ -189,7 +189,7 @@ def plot_pareto_front():
 
     save_path = os.path.join(PROJECT_ROOT, "results", "plot_pareto_front.png")
     plt.tight_layout()
-    plt.savefig(save_path)
+    plt.savefig(save_path, format="pdf")
     print(f"帕累托前沿图已保存至: {save_path}")
     plt.show()
 
@@ -236,7 +236,7 @@ def plot_baseline_comparison():
 
     save_path = os.path.join(PROJECT_ROOT, "results", "plot_baseline_comparison.png")
     plt.tight_layout()
-    plt.savefig(save_path, bbox_inches='tight')
+    plt.savefig(save_path, bbox_inches='tight', format="pdf")
     print(f"基准对比图已保存至: {save_path}")
     plt.show()
 
@@ -282,7 +282,7 @@ def plot_timeseries_analysis():
                      color='#34495e', alpha=0.1)
 
     # 标注流量突发区 (假设在 300-500 步之间发生拥塞，可根据真实数据调整阴影位置)
-    plt.axvspan(300, 500, color='yellow', alpha=0.15, label='High Traffic Burst Area')
+    # plt.axvspan(300, 500, color='yellow', alpha=0.15, label='High Traffic Burst Area')
 
     plt.title('Dynamic AoI Response under Real-world Traffic Fluctuations', pad=15, fontweight='bold')
     plt.xlabel('Request Sequence (Time Step)')
@@ -293,7 +293,7 @@ def plot_timeseries_analysis():
 
     save_path = os.path.join(PROJECT_ROOT, "results", "plot_timeseries_stress.png")
     plt.tight_layout()
-    plt.savefig(save_path, bbox_inches='tight')
+    plt.savefig(save_path, bbox_inches='tight', format="pdf")
     print(f"时序动态响应图已保存至: {save_path}")
     plt.show()
 

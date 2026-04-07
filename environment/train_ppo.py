@@ -68,7 +68,8 @@ def train_real_world_pareto():
     TRAIN_REQS_PER_EPISODE = 500
 
     # 帕累托权重组合
-    pareto_weights = [(0.9, 0.1), (0.7, 0.3), (0.5, 0.5), (0.3, 0.7), (0.1, 0.9)]
+    # pareto_weights = [(0.9, 0.1), (0.7, 0.3), (0.5, 0.5), (0.3, 0.7), (0.1, 0.9)]
+    pareto_weights = [(0.1, 0.9)]
     num_cpus = min(8, multiprocessing.cpu_count())
     logger.info(f"开启 CPU 多进程加速，同时运行 {num_cpus} 个平行仿真环境！")
 
@@ -120,17 +121,9 @@ def train_pareto_models():
 
     # 训练参数
     TRAIN_REQS_PER_EPISODE = 500  # 让每回合足够长，让智能体吃尽苦头去学习
-    TOTAL_TIMESTEPS = 80000       # 每个模型的总训练步数 (如果算力够，可设为 100000)
+    TOTAL_TIMESTEPS = 50000       # 每个模型的总训练步数 (如果算力够，可设为 100000)
 
     # 2. 设定我们要探索的权重组合 (alpha: 成本权重, beta: AoI 权重)
-    pareto_weights = [
-        (0.9, 0.1), # 极端偏好：省钱 (Cost 优先)
-        (0.7, 0.3),
-        (0.5, 0.5), # 绝对平衡
-        (0.3, 0.7),
-        (0.1, 0.9)  # 极端偏好：新鲜度 (AoI 优先)
-    ]
-
     pareto_weights = [
         (0.9, 0.1), (0.7, 0.3), (0.5, 0.5), (0.3, 0.7), (0.1, 0.9)
     ]
@@ -312,8 +305,8 @@ def train_and_evaluate_ppo():
 
 
 if __name__ == "__main__":
-    # train_real_world_pareto()
+    train_real_world_pareto()
     # train_pareto_models()
     # train_scalability_models()
-    train_and_evaluate_ppo()
+    # train_and_evaluate_ppo()
 

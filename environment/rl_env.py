@@ -123,8 +123,8 @@ class DTEngineEnv(gym.Env):
 
         self.max_env_aoi = worst_sense + worst_comp + worst_queue + worst_res
 
-        logger.info(
-            f"[RL Env Bounds] AoI Range: [0, {self.max_env_aoi:.2f}], Cost Range: [{self.min_env_cost:.2f}, {self.max_env_cost:.2f}]")
+        # logger.debug(
+        #     f"[RL Env Bounds] AoI Range: [0, {self.max_env_aoi:.2f}], Cost Range: [{self.min_env_cost:.2f}, {self.max_env_cost:.2f}]")
 
     def _compute_lower_bound(self, req):
         """
