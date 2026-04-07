@@ -1,5 +1,6 @@
 import pandas as pd
 import folium
+import branca.colormap as cm
 import os
 from pathlib import Path
 
@@ -107,11 +108,19 @@ def plot_deployment_bubble_map():
     center_lat = df['Latitude'].mean()
     center_lon = df['Longitude'].mean()
 
-    # 使用深色底图 (CartoDB dark_matter) 能让热力气泡展现出极强的科技感和对比度！
+    # 使用深色底图 (CartoDB dark_matter) 能让热力气泡展现出极强的科技感和对比度
     m = folium.Map(location=[center_lat, center_lon], zoom_start=13, tiles='CartoDB dark_matter')
 
-    # 找出最大负载量，用于气泡大小的归一化
     max_load = df['Load_Count'].max()
+
+    # 定义丰富的连续渐变色带 (Colormap)
+    colormap = cm.LinearColormap(
+        colors=['#1e88e5', '#00e5ff', '#00e676', '#ffea00', '#ff1744'],
+        vmin=0,           # 最小值
+        vmax=max_load     # 最大值
+    )
+    # 为图例设置标题
+    colormap.caption = 'DT Deployment Load Count'
 
     for _, row in df.iterrows():
         load = row['Load_Count']
@@ -121,40 +130,51 @@ def plot_deployment_bubble_map():
             folium.CircleMarker(
                 location=[row['Latitude'], row['Longitude']],
                 radius=3,
-                color='gray',
+                color='white',
+                weight=1,
                 fill=True,
                 fill_color='gray',
                 fill_opacity=0.3,
                 popup=f"ID: {row['Node_ID']}<br>Load: 0"
             ).add_to(m)
         else:
-            # 如果有负载，画一个彩色发光的气泡
+            dynamic_color = colormap(load)
+
             # 半径根据负载量动态计算 (基础大小 + 比例放大)
             radius_size = 5 + (load / max_load) * 20
-
-            # 颜色渐变：负载越高越偏红，负载低偏蓝/黄
-            if load > max_load * 0.7:
-                color = '#ff1744'  # 亮红色 (高负载)
-            elif load > max_load * 0.3:
-                color = '#ffea00'  # 明黄色 (中负载)
-            else:
-                color = '#00e676'  # 荧光绿 (低负载)
 
             folium.CircleMarker(
                 location=[row['Latitude'], row['Longitude']],
                 radius=radius_size,
-                color=color,
-                weight=1,  # 边框极细
+                color=dynamic_color, # 使用自动计算出的渐变色
+                weight=1,            # 边框极细
                 fill=True,
-                fill_color=color,
-                fill_opacity=0.6,  # 半透明叠加效果
+                fill_color=dynamic_color,
+                fill_opacity=0.6,    # 半透明叠加效果
                 popup=f"<b>ID:</b> {row['Node_ID']}<br><b>Deployments:</b> {load}",
                 tooltip=f"Load: {load}"
             ).add_to(m)
 
+    # 将图例添加到地图上
+    m.add_child(colormap)
+    # ==========================================
+    # 强制将图例生成的 svg 文本填充色 (fill) 改为白色，并加粗一点增加可读性
+    # ==========================================
+    css_injection = """
+        <style>
+            svg text { 
+                fill: white !important; 
+                font-weight: 500 !important;
+                font-size: 13px !important;
+            }
+        </style>
+        """
+    m.get_root().header.add_child(folium.Element(css_injection))
+
     save_path = os.path.join(PROJECT_ROOT, "results", "interactive_deployment_heatmap.html")
     m.save(save_path)
     print(f"空间部署气泡图已生成: {save_path}")
+
 
 if __name__ == "__main__":
     # if not os.path.exists(CSV_PATH):

@@ -459,6 +459,66 @@ def generate_spatial_heatmap_data(dataset):
     return df
 
 
+def generate_spatial_heatmap_data_greedy(dataset):
+    logger.info("\n" + "=" * 50)
+    logger.info(">>> 正在进行实验 4.1: 收集空间部署热力数据 (Greedy Agent) <<<")
+
+    # 1. 像评估 PPO 一样，初始化完全相同的强化学习环境
+    env = DTEngineEnv(
+        network=dataset['network'],
+        users=dataset['users'],
+        task_chains=dataset['task_chains'],
+        total_reqs=500,  # 保持与 PPO 一致的 500 个请求
+        seed=2026
+    )
+
+    # 2. 实例化你封装好的 GreedyAgent
+    agent = GreedyAgent(env)
+
+    obs, info = env.reset()
+
+    # 用一个字典来记录每个基站 (EdgeNode) 接收了多少次 DT 部署
+    deployment_counts = defaultdict(int)
+
+    # 获取所有的 EdgeNode 列表，方便通过 action (索引) 找回真实的基站对象
+    edge_nodes = [data.get('node') for n, data in env.network.graph.nodes(data=True)
+                  if type(data.get('node')).__name__ == 'EdgeNode']
+
+    # 3. 完美复用与 PPO 完全相同的交互循环
+    for step in range(500):
+        # 调用 GreedyAgent 的 predict 接口
+        action, _ = agent.predict(obs, deterministic=True)
+        obs, reward, terminated, truncated, info = env.step(action)
+
+        # 只要没有因为资源枯竭被 Drop (Cost != inf)，就记录有效部署
+        if info.get('cost') != float('inf'):
+            target_en = edge_nodes[action]
+            deployment_counts[target_en.id] += 1
+
+        if terminated or truncated:
+            break
+
+    # 4. 将统计数据转化为 DataFrame 并附上经纬度
+    heatmap_data = []
+    for en in edge_nodes:
+        count = deployment_counts.get(en.id, 0)
+        heatmap_data.append({
+            'Node_ID': en.id,
+            'Latitude': en.lat,
+            'Longitude': en.lon,
+            'Load_Count': count
+        })
+
+    df = pd.DataFrame(heatmap_data)
+
+    # 确保 PROJECT_ROOT 在文件顶部已定义
+    save_path = os.path.join(PROJECT_ROOT, "results", "exp_heatmap_data_greedy.csv")
+    df.to_csv(save_path, index=False)
+    logger.info(f"贪心算法热力分布数据已保存至: {save_path}")
+
+    return df
+
+
 if __name__ == "__main__":
     # === 随机数据集 ===
     # 确保根目录下有 results 文件夹
@@ -477,9 +537,10 @@ if __name__ == "__main__":
     real_dataset_path = os.path.join(PROJECT_ROOT, "data", "dataset_real_30.pkl")
     real_dataset = load_dataset(real_dataset_path)
 
-    run_real_world_pareto_analysis(real_dataset)
-    run_baseline_comparison(real_dataset)
-    run_timeseries_stress_test(real_dataset)
-    generate_spatial_heatmap_data(real_dataset)
+    # run_real_world_pareto_analysis(real_dataset)
+    # run_baseline_comparison(real_dataset)
+    # run_timeseries_stress_test(real_dataset)
+    # generate_spatial_heatmap_data(real_dataset)
+    generate_spatial_heatmap_data_greedy(real_dataset)
 
     logger.info("\n恭喜！所有实验数据已全部采出，准备画图。")

@@ -74,7 +74,7 @@ def plot_load_sensitivity():
     fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, 1.05), ncol=len(labels), frameon=False)
     plt.tight_layout()
     plt.subplots_adjust(top=0.85)
-    plt.savefig(os.path.join(RESULTS_DIR, "fig_load_sensitivity.png"), bbox_inches='tight', format="pdf")
+    plt.savefig(os.path.join(RESULTS_DIR, "fig_load_sensitivity.pdf"), bbox_inches='tight', format="pdf")
     plt.show()
 
 
@@ -106,7 +106,7 @@ def plot_scalability():
     ax_time.legend()
 
     plt.tight_layout()
-    plt.savefig(os.path.join(RESULTS_DIR, "fig_scalability.png"), bbox_inches='tight', format="pdf")
+    plt.savefig(os.path.join(RESULTS_DIR, "fig_scalability.pdf"), bbox_inches='tight', format="pdf")
     plt.show()
 
 
@@ -144,7 +144,7 @@ def plot_pareto():
     ax.legend()
 
     plt.tight_layout()
-    plt.savefig(os.path.join(RESULTS_DIR, "fig_pareto.png"), bbox_inches='tight', format="pdf")
+    plt.savefig(os.path.join(RESULTS_DIR, "fig_pareto.pdf"), bbox_inches='tight', format="pdf")
     plt.show()
 
 
@@ -187,7 +187,7 @@ def plot_pareto_front():
                  xytext=(0.3, 0.2), arrowprops=dict(facecolor='black', shrink=0.05, width=1.5, headwidth=8),
                  fontweight='bold', color='#2c3e50')
 
-    save_path = os.path.join(PROJECT_ROOT, "results", "plot_pareto_front.png")
+    save_path = os.path.join(PROJECT_ROOT, "results", "plot_pareto_front.pdf")
     plt.tight_layout()
     plt.savefig(save_path, format="pdf")
     print(f"帕累托前沿图已保存至: {save_path}")
@@ -234,7 +234,7 @@ def plot_baseline_comparison():
 
     plt.suptitle('Performance Comparison Across Different Algorithms', fontweight='bold')
 
-    save_path = os.path.join(PROJECT_ROOT, "results", "plot_baseline_comparison.png")
+    save_path = os.path.join(PROJECT_ROOT, "results", "plot_baseline_comparison.pdf")
     plt.tight_layout()
     plt.savefig(save_path, bbox_inches='tight', format="pdf")
     print(f"基准对比图已保存至: {save_path}")
@@ -291,7 +291,7 @@ def plot_timeseries_analysis():
     # 将图例放在外侧防遮挡
     plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
 
-    save_path = os.path.join(PROJECT_ROOT, "results", "plot_timeseries_stress.png")
+    save_path = os.path.join(PROJECT_ROOT, "results", "plot_timeseries_stress.pdf")
     plt.tight_layout()
     plt.savefig(save_path, bbox_inches='tight', format="pdf")
     print(f"时序动态响应图已保存至: {save_path}")
