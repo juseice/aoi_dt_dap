@@ -12,6 +12,8 @@ from core import EdgeNode
 from core import Sensor
 from core import UserNode
 
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
+plt.rcParams['axes.unicode_minus'] = False
 
 def _load_geo_dict_from_csv(csv_path):
     """内部辅助函数：从 CSV 加载坐标字典"""
@@ -102,11 +104,11 @@ def plot_network_topology(network):
     # 绘制节点 (使用更现代、对比度更高的颜色组合)
     # edgecolors='black' 增加节点描边，提高清晰度
     nx.draw_networkx_nodes(G, pos, nodelist=sensors, node_color='#4caf50', node_shape='^', node_size=SENSOR_SIZE,
-                           label='Sensors', edgecolors='black', linewidths=1.5)  # 鲜艳绿
+                           label='传感器', edgecolors='black', linewidths=1.5)  # 鲜艳绿
     nx.draw_networkx_nodes(G, pos, nodelist=edge_nodes, node_color='#2196f3', node_shape='o', node_size=EDGE_SIZE,
-                           label='Edge Nodes', edgecolors='black', linewidths=1.5)  # 鲜艳蓝
+                           label='边缘节点', edgecolors='black', linewidths=1.5)  # 鲜艳蓝
     nx.draw_networkx_nodes(G, pos, nodelist=users, node_color='#f44336', node_shape='s', node_size=USER_SIZE,
-                           label='Users', edgecolors='black', linewidths=1.5)  # 鲜艳红
+                           label='用户', edgecolors='black', linewidths=1.5)  # 鲜艳红
 
     # 绘制边 (增加透明度和箭头大小)
     # edge_color 为灰色，避免干扰节点颜色
@@ -199,13 +201,13 @@ def plot_macro_topology(network, geo_csv_path=None, layout_type='spring'):
     USER_SIZE = 6
 
     nx.draw_networkx_nodes(G, pos, nodelist=edge_nodes, node_color='#2196f3',
-                           node_shape='o', node_size=EDGE_SIZE, label='Edge Nodes', alpha=0.9, edgecolors='white',
+                           node_shape='o', node_size=EDGE_SIZE, label='边缘节点', alpha=0.9, edgecolors='white',
                            linewidths=0.5)
     nx.draw_networkx_nodes(G, pos, nodelist=sensors, node_color='#4caf50',
-                           node_shape='^', node_size=SENSOR_SIZE, label='Sensors', alpha=0.9, edgecolors='white',
+                           node_shape='^', node_size=SENSOR_SIZE, label='传感器', alpha=0.9, edgecolors='white',
                            linewidths=0.5)
     nx.draw_networkx_nodes(G, pos, nodelist=users, node_color='#f44336',
-                           node_shape='s', node_size=USER_SIZE, label='Users', alpha=0.9, edgecolors='white',
+                           node_shape='s', node_size=USER_SIZE, label='用户', alpha=0.9, edgecolors='white',
                            linewidths=0.5)
 
     # 极简绘制边 (去箭头、降透明度、减细线条)
@@ -286,9 +288,9 @@ def plot_infrastructure_topology(network, geo_csv_path=None, fixed_pos=None):
 
     # 节点大小保持适中
     nx.draw_networkx_nodes(G_infra, pos, nodelist=edge_nodes, node_color='#2196f3',
-                           node_shape='o', node_size=80, label='Edge Nodes', edgecolors='white', linewidths=1)
+                           node_shape='o', node_size=80, label='边缘节点', edgecolors='white', linewidths=1)
     nx.draw_networkx_nodes(G_infra, pos, nodelist=sensors, node_color='#4caf50',
-                           node_shape='^', node_size=40, label='Sensors', edgecolors='white', linewidths=1)
+                           node_shape='^', node_size=40, label='传感器', edgecolors='white', linewidths=1)
 
     # 因为去掉了大量用户的连线，基础设施的连线可以稍微加深一点，展现骨干质感
     nx.draw_networkx_edges(G_infra, pos, edge_color='#9E9E9E', width=1.0, alpha=0.5, arrows=False)
@@ -319,22 +321,22 @@ def plot_simulation_results(metrics_history):
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 
     # 1. 绘制 AoI 曲线
-    ax1.plot(reqs, aois, marker='o', linestyle='-', color='#1f77b4', label='AoI')
+    ax1.plot(reqs, aois, marker='o', linestyle='-', color='#1f77b4', label='信息年龄')
     # 在发生迁移的点上打上红色的星号标记
     if migrations:
-        ax1.scatter(migrations, mig_aois, color='red', s=100, marker='*', zorder=5, label='Migration Triggered')
+        ax1.scatter(migrations, mig_aois, color='red', s=100, marker='*', zorder=5, label='发生迁移')
 
-    ax1.set_xlabel('Request Sequence')
-    ax1.set_ylabel('Age of Information (s)')
-    ax1.set_title('AoI Evolution')
+    ax1.set_xlabel('请求序列')
+    ax1.set_ylabel('信息年龄 (秒)')
+    ax1.set_title('信息年龄趋势折线图')
     ax1.grid(True, linestyle='--', alpha=0.7)
     ax1.legend()
 
     # 2. 绘制 Cost 曲线
-    ax2.plot(reqs, costs, marker='s', linestyle='-', color='#ff7f0e', label='System Cost')
-    ax2.set_xlabel('Request Sequence')
-    ax2.set_ylabel('Cost')
-    ax2.set_title('System Cost Evolution')
+    ax2.plot(reqs, costs, marker='s', linestyle='-', color='#ff7f0e', label='成本')
+    ax2.set_xlabel('请求序列')
+    ax2.set_ylabel('成本')
+    ax2.set_title('成本趋势折线图')
     ax2.grid(True, linestyle='--', alpha=0.7)
     ax2.legend()
 
@@ -383,32 +385,38 @@ def plot_comparative_results(histories):
             else:
                 aois.append(h['aoi'])
 
-            # (原代码这里有个reqs.append重复了，且costs重复收集，已修正为单次遍历收集)
             # 处理 Cost 中的 inf 同样可以使用 None
             if math.isinf(h['cost']):
                 costs.append(None)
             else:
                 costs.append(h['cost'])
+        localize_label = {
+            "Random Baseline": "随机基线算法",
+            "Greedy Best": "贪心算法",
+            "DP Ideal": "基于动态规划的最优部署算法（理想）",
+            "DP Real": "基于动态规划的最优部署算法（实际部署）",
+            "PPO (DRL)": "基于近端策略优化的边缘数字孪生信息年龄与成本优化算法"
+        }
 
         # 1. 绘制 AoI 对比
-        ax1.plot(reqs, aois, label=label, color=style['color'], marker=style['marker'],
+        ax1.plot(reqs, aois, label=localize_label[label], color=style['color'], marker=style['marker'],
                  linestyle=style.get('linestyle', '-'), linewidth=2, markersize=8)
 
         # 2. 绘制 Cost 对比
-        ax2.plot(reqs, costs, label=label, color=style['color'], marker=style['marker'],
+        ax2.plot(reqs, costs, label=localize_label[label], color=style['color'], marker=style['marker'],
                  linestyle=style.get('linestyle', '-'), linewidth=2, markersize=8)
 
     # 装饰 AoI 图表
-    ax1.set_title('Average Age of Information (AoI) Comparison', fontsize=14, fontweight='bold')
-    ax1.set_xlabel('Request Sequence', fontsize=12)
-    ax1.set_ylabel('AoI (seconds)', fontsize=12)
+    ax1.set_title('平均信息年龄比较', fontsize=14, fontweight='bold')
+    ax1.set_xlabel('请求序列', fontsize=12)
+    ax1.set_ylabel('信息年龄 (秒)', fontsize=12)
     ax1.grid(True, linestyle=':', alpha=0.8)
     ax1.legend(fontsize=12, loc='best')
 
     # 装饰 Cost 图表
-    ax2.set_title('System Operational Cost Comparison', fontsize=14, fontweight='bold')
-    ax2.set_xlabel('Request Sequence', fontsize=12)
-    ax2.set_ylabel('Total Cost', fontsize=12)
+    ax2.set_title('平均成本比较', fontsize=14, fontweight='bold')
+    ax2.set_xlabel('请求序列', fontsize=12)
+    ax2.set_ylabel('总计成本', fontsize=12)
     ax2.grid(True, linestyle=':', alpha=0.8)
     ax2.legend(fontsize=12, loc='best')
 

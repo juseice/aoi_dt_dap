@@ -222,6 +222,9 @@ def run_real_world_pareto_analysis(dataset):
 
     # 2. 定义要测试的模型权重组合
     weights = [(0.9, 0.1), (0.7, 0.3), (0.5, 0.5), (0.3, 0.7), (0.1, 0.9)]
+    # weights.append((0.45, 0.55), (0.4, 0.6), (0.35, 0.65))
+    # weights = [(0.45, 0.55), (0.4, 0.6), (0.35, 0.65)]
+    # weights = [(0.55, 0.45), (0.6, 0.4), (0.65, 0.35)]
 
     # 3. 逐一加载并评估 PPO 模型
     logger.info("--- 正在评估 PPO 模型族 ---")
@@ -269,7 +272,6 @@ def run_baseline_comparison(dataset):
     results = []
     TEST_LOAD = 1000  # 使用 1000 个真实请求作为压力测试
 
-    # 🌟 核心设定：固定环境的随机种子！
     # 这保证了无论哪个算法上场，用户的出现顺序、请求的类型都分毫不差，绝对公平。
     TEST_SEED = 2026
 
@@ -287,7 +289,7 @@ def run_baseline_comparison(dataset):
     # ==========================================
     model_path = os.path.join(PROJECT_ROOT, "environment", "models", "pareto_real", "ppo_real_a0.5_b0.5")
     if os.path.exists(model_path + ".zip"):
-        logger.info("\n[1/4] 正在评估 PA-PPO (均衡型 a=0.5, b=0.5)...")
+        logger.info("\n[1/4] 正在评估 PA-PPO (a=0.5, b=0.5)...")
         env.alpha, env.beta = 0.5, 0.5
         agent_ppo = PPO.load(model_path, env=env)
 
@@ -300,28 +302,41 @@ def run_baseline_comparison(dataset):
     # ==========================================
     # 选手 2: Greedy-Cost
     # ==========================================
-    logger.info("\n[2/4] 正在评估 Greedy-Cost (追求极低成本)...")
-    # 权重设为 0.99，让环境在算分时极度放大 Cost 的影响
-    env.alpha, env.beta = 0.99, 0.01
-    # 确保重置环境，复原初始内存和相同的请求流
-    env.reset(seed=TEST_SEED)
-
-    agent_greedy_cost = GreedyAgent(env)
-    m_gc = evaluate_agent_full("Greedy-Cost", agent_greedy_cost, env, TEST_LOAD)
-    m_gc['Algorithm'] = 'Greedy-Cost'
-    results.append(m_gc)
+    # logger.info("\n[2/4] 正在评估 Greedy-Cost (追求极低成本)...")
+    # # 权重设为 0.99，让环境在算分时极度放大 Cost 的影响
+    # env.alpha, env.beta = 0.99, 0.01
+    # # 确保重置环境，复原初始内存和相同的请求流
+    # env.reset(seed=TEST_SEED)
+    #
+    # agent_greedy_cost = GreedyAgent(env)
+    # m_gc = evaluate_agent_full("Greedy-Cost", agent_greedy_cost, env, TEST_LOAD)
+    # m_gc['Algorithm'] = 'Greedy-Cost'
+    # results.append(m_gc)
 
     # ==========================================
     # 选手 3: Greedy-AoI
     # ==========================================
-    logger.info("\n[3/4] 正在评估 Greedy-AoI (追求极低延迟)...")
+    # logger.info("\n[3/4] 正在评估 Greedy-AoI (追求极低延迟)...")
+    # # 权重设为 0.01，让环境在算分时极度放大 AoI 的影响
+    # env.alpha, env.beta = 0.01, 0.99
+    # env.reset(seed=TEST_SEED)
+    #
+    # agent_greedy_aoi = GreedyAgent(env)
+    # m_ga = evaluate_agent_full("Greedy-AoI", agent_greedy_aoi, env, TEST_LOAD)
+    # m_ga['Algorithm'] = 'Greedy-AoI'
+    # results.append(m_ga)
+
+    # ==========================================
+    # 选手 2: Greedy
+    # ==========================================
+    logger.info("\n[2/4] 正在评估 Greedy...")
     # 权重设为 0.01，让环境在算分时极度放大 AoI 的影响
-    env.alpha, env.beta = 0.01, 0.99
+    env.alpha, env.beta = 0.5, 0.5
     env.reset(seed=TEST_SEED)
 
     agent_greedy_aoi = GreedyAgent(env)
-    m_ga = evaluate_agent_full("Greedy-AoI", agent_greedy_aoi, env, TEST_LOAD)
-    m_ga['Algorithm'] = 'Greedy-AoI'
+    m_ga = evaluate_agent_full("Greedy", agent_greedy_aoi, env, TEST_LOAD)
+    m_ga['Algorithm'] = 'Greedy'
     results.append(m_ga)
 
 
@@ -350,7 +365,7 @@ def run_timeseries_stress_test(dataset):
     logger.info("=" * 50)
 
     # 使用较长的请求流观察波动
-    TEST_LOAD = 800
+    TEST_LOAD = 1000
     TEST_SEED = 2026
 
     # 我们对比两个核心选手
@@ -416,7 +431,7 @@ def generate_spatial_heatmap_data(dataset):
     )
 
     # 找一个优秀的 PPO 模型来展示它的“排兵布阵”
-    model_path = os.path.join(PROJECT_ROOT, "environment", "models", "pareto_real", "ppo_real_a0.5_b0.5")
+    model_path = os.path.join(PROJECT_ROOT, "environment", "models", "pareto_real", "ppo_real_a0.9_b0.1")
     agent = PPO.load(model_path, env=env)
 
     obs, info = env.reset()
@@ -539,8 +554,8 @@ if __name__ == "__main__":
 
     # run_real_world_pareto_analysis(real_dataset)
     # run_baseline_comparison(real_dataset)
-    # run_timeseries_stress_test(real_dataset)
+    run_timeseries_stress_test(real_dataset)
     # generate_spatial_heatmap_data(real_dataset)
-    generate_spatial_heatmap_data_greedy(real_dataset)
+    # generate_spatial_heatmap_data_greedy(real_dataset)
 
     logger.info("\n恭喜！所有实验数据已全部采出，准备画图。")
