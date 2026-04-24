@@ -50,7 +50,7 @@ def evaluate_agent(algo_name, agent, env, seed):
 
 def main():
     logger.info("正在加载测试数据集...")
-    dataset = load_dataset("data/dataset_debug.pkl")
+    dataset = load_dataset("data/dataset_large.pkl")
     COMMON_SEED = dataset['config']['seed']
     TOTAL_REQUESTS = len(dataset['request_stream'])
 
@@ -73,7 +73,7 @@ def main():
     }
 
     # 如果有训练好的 PPO 模型，加载它
-    ppo_model_path = "environment/models/ppo_dt_deployment.zip"
+    ppo_model_path = "environment/models/pareto/ppo_a0.5_b0.5_large.zip"
     if os.path.exists(ppo_model_path):
         agents["PPO (DRL)"] = PPO.load(ppo_model_path, env=env)
     else:
@@ -100,7 +100,7 @@ def main():
     # 4. 数据落盘与可视化 (和你之前一样)
     save_simulation_results(all_histories, filename="results/latest_simulation.json")
     generate_summary_report(all_histories, TOTAL_REQUESTS)
-    plot_comparative_results(all_histories)
+    plot_comparative_results(all_histories, 50)
 
 
 if __name__ == "__main__":

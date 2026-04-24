@@ -344,10 +344,11 @@ def plot_simulation_results(metrics_history):
     plt.show()
 
 
-def plot_comparative_results(histories):
+def plot_comparative_results(histories, num=-1):
     """
     绘制多种算法的对比折线图
     :param histories: 字典格式，如 {'Random Baseline': history1, 'Greedy Best': history2}
+    :param num: 绘制个数
     """
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), dpi=100)
 
@@ -375,7 +376,9 @@ def plot_comparative_results(histories):
         aois = []
         costs = []
 
-        for h in history:
+        if num == -1:
+            num = len(history)
+        for h in history[:num]:
             reqs.append(h['req'])
             # 如果是 inf，用 None 替代，这样 matplotlib 会在这里画一个断点，
             # 或者你可以选择在汇总报告中过滤，并在画图时直接跳过非法点，
@@ -418,7 +421,7 @@ def plot_comparative_results(histories):
     ax2.set_xlabel('请求序列', fontsize=12)
     ax2.set_ylabel('总计成本', fontsize=12)
     ax2.grid(True, linestyle=':', alpha=0.8)
-    ax2.legend(fontsize=12, loc='best')
+    # ax2.legend(fontsize=12, loc='best')
 
     plt.tight_layout()
     plt.show()

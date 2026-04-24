@@ -216,7 +216,7 @@ def train_and_evaluate_ppo():
 
     # 1. 准备物理网络环境
     # net, users, task_chains = setup_clean_environment()
-    dataset = load_dataset("../data/dataset_debug.pkl")
+    dataset = load_dataset("../data/load_dataset_lambda_100.pkl")
     net = dataset['network']
     users = dataset['users']
     task_chains = dataset['task_chains']
@@ -251,8 +251,8 @@ def train_and_evaluate_ppo():
 
     # 保存训练好的大脑权重
     os.makedirs("models", exist_ok=True)
-    model.save("models/ppo_dt_deployment")
-    logger.info("模型已保存至 models/ppo_dt_deployment.zip")
+    model.save("models/load_test")
+    logger.info("模型已保存至 models/load_test.zip")
 
     logger.info("\n" + "=" * 50)
     logger.info("3：评估训练好的模型")
@@ -261,7 +261,7 @@ def train_and_evaluate_ppo():
     # 评估时，我们需要用一个【固定 Seed】的干净环境，以保证公平性
     EVAL_REQS = 30
     # eval_net, eval_users, eval_task_chains = setup_clean_environment()
-    dataset = load_dataset("../data/dataset_debug.pkl")
+    dataset = load_dataset("../data/load_dataset_lambda_100.pkl")
     eval_net = dataset['network']
     eval_users = dataset['users']
     eval_task_chains = dataset['task_chains']
@@ -305,8 +305,8 @@ def train_and_evaluate_ppo():
 
 
 if __name__ == "__main__":
-    train_real_world_pareto()
+    # train_real_world_pareto()
     # train_pareto_models()
     # train_scalability_models()
-    # train_and_evaluate_ppo()
+    train_and_evaluate_ppo()
 

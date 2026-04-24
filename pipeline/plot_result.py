@@ -51,19 +51,19 @@ def plot_load_sensitivity():
         return
 
     df = pd.read_csv(csv_path)
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5), dpi=100)
+    fig, axes = plt.subplots(1, 3, figsize=(12, 5), dpi=100)
     ax_aoi, ax_cost, ax_succ = axes
     localize_label = {
         "Random": "随机基线算法",
         "Greedy": "贪心算法",
         "DP Ideal": "基于动态规划的最优部署算法（理想）",
         "DP Real": "基于动态规划的最优部署算法",
-        "PPO (DRL)": "基于近端策略优化的边缘数字孪生信息年龄与成本优化算法"
+        "PA-PPO": "基于近端策略优化的边缘数字孪生信息年龄与成本优化算法"
     }
 
     for algo in df['Algorithm'].unique():
-        algo_data = df[df['Algorithm'] == algo].sort_values(by='Load')
-        x = algo_data['Load']
+        algo_data = df[df['Algorithm'] == algo].sort_values(by='Lambda')
+        x = algo_data['Lambda']
         style = get_style(algo)
         algo_data['Avg_AoI'] = algo_data['Avg_AoI'] * 1000
 
@@ -71,9 +71,9 @@ def plot_load_sensitivity():
         ax_cost.plot(x, algo_data['Avg_Cost'], label=localize_label[algo], **style, linewidth=2, markersize=7)
         ax_succ.plot(x, algo_data['Success_Rate'], label=localize_label[algo], **style, linewidth=2, markersize=7)
 
-    ax_aoi.set(title='(a) 平均信息年龄 vs 负载', xlabel='总计请求', ylabel='信息年龄 (毫秒)')
-    ax_cost.set(title='(b) 平均成本 vs 负载', xlabel='总计请求', ylabel='成本')
-    ax_succ.set(title='(c) 成功率 vs 负载', xlabel='总计请求', ylabel='成功率 (%)')
+    ax_aoi.set(title='(a) 平均信息年龄 vs 瞬时负载', xlabel='瞬时请求数量 (req/s)', ylabel='信息年龄 (毫秒)')
+    ax_cost.set(title='(b) 平均成本 vs 瞬时负载', xlabel='瞬时请求数量 (req/s)', ylabel='成本')
+    ax_succ.set(title='(c) 成功率 vs 瞬时负载', xlabel='瞬时请求数量 (req/s)', ylabel='成功率 (%)')
     ax_succ.set_ylim(-5, 105)
 
     for ax in axes:
@@ -329,7 +329,7 @@ def plot_baseline_comparison():
     df['Algorithm_CN'] = df['Algorithm'].map(localize_label_plot)
 
     # 创建 1x3 的并排子图
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5), dpi=300)
+    fig, axes = plt.subplots(1, 3, figsize=(12, 5), dpi=300)
 
     # 自定义颜色，突出 PPO
     colors = ['#e74c3c' if algo == 'PA-PPO' else '#3498db' for algo in df['Algorithm']]
@@ -354,12 +354,13 @@ def plot_baseline_comparison():
     # 美化 X 轴标签
     for ax in axes:
         ax.set_xlabel('')
-        ax.tick_params(axis='x', rotation=15)
+        ax.tick_params(axis='x', rotation=0, labelsize=12)
+        ax.tick_params(axis='y', labelsize=12)
 
     plt.suptitle('不同算法的性能对比', fontweight='bold')
 
     save_path = os.path.join(PROJECT_ROOT, "results", "plot_baseline_comparison.pdf")
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.savefig(save_path, bbox_inches='tight', format="pdf")
     print(f"基准对比图已保存至: {save_path}")
     plt.show()
@@ -376,7 +377,7 @@ def plot_timeseries_analysis():
 
     df = pd.read_csv(csv_path)
 
-    plt.figure(figsize=(12, 6), dpi=300)
+    plt.figure(figsize=(11, 6), dpi=300)
 
     # 原始数据是 step 级别的，会有剧烈的毛刺。
     # 论文中为了看清趋势，通常使用滑动平均 (Rolling Mean) 进行平滑处理。
@@ -397,24 +398,27 @@ def plot_timeseries_analysis():
 
     # 添加半透明的置信带 (展示原始数据的波动范围)
     plt.fill_between(df_ppo['Step'],
-                     df_ppo['Smoothed_AoI'] - df_ppo['Instant_AoI'].rolling(window_size).std(),
-                     df_ppo['Smoothed_AoI'] + df_ppo['Instant_AoI'].rolling(window_size).std(),
+                     df_ppo['Smoothed_AoI'] - (df_ppo['Instant_AoI'].rolling(window_size).std())/2,
+                     df_ppo['Smoothed_AoI'] + (df_ppo['Instant_AoI'].rolling(window_size).std())/2,
                      color='#e74c3c', alpha=0.15)
 
     plt.fill_between(df_greedy['Step'],
-                     df_greedy['Smoothed_AoI'] - df_greedy['Instant_AoI'].rolling(window_size).std(),
-                     df_greedy['Smoothed_AoI'] + df_greedy['Instant_AoI'].rolling(window_size).std(),
+                     df_greedy['Smoothed_AoI'] - (df_greedy['Instant_AoI'].rolling(window_size).std())/2,
+                     df_greedy['Smoothed_AoI'] + (df_greedy['Instant_AoI'].rolling(window_size).std())/2,
                      color='#34495e', alpha=0.1)
 
     # 标注流量突发区 (假设在 300-500 步之间发生拥塞，可根据真实数据调整阴影位置)
-    # plt.axvspan(300, 500, color='yellow', alpha=0.15, label='High Traffic Burst Area')
+    # plt.axvspan(400, 600, color='yellow', alpha=0.15, label='High Traffic Burst Area')
 
     plt.title('真实世界流量影响下的动态信息年龄响应', pad=15, fontweight='bold')
-    plt.xlabel('请求序列 (每分钟)')
+    plt.xlabel('请求序列')
     plt.ylabel('瞬时信息年龄 （毫秒）')
+    plt.xlim(0, 1000)
+    plt.ylim(0, 10000)
 
     # 将图例放在外侧防遮挡
-    plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
+    # plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
+    plt.legend(loc='best')
 
     save_path = os.path.join(PROJECT_ROOT, "results", "plot_timeseries_stress.pdf")
     plt.tight_layout()
@@ -426,16 +430,16 @@ def plot_timeseries_analysis():
 if __name__ == "__main__":
     print("正在生成实验图表...")
     # === 随机数据 ===
-    plot_load_sensitivity()
-    plot_scalability()
+    # plot_load_sensitivity()
+    # plot_scalability()
     # plot_pareto()
 
     # === 真实数据 ===
     # plot_pareto_front()
-    plot_baseline_comparison()
+    # plot_baseline_comparison()
     plot_timeseries_analysis()
 
     # === 补充实验 ===
-    plot_weight_sensitivity("PPO")
+    # plot_weight_sensitivity("PPO")
 
     print("图表已全部生成并保存在 results/ 目录下！")

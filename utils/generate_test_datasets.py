@@ -1,7 +1,61 @@
 import os
-# 请确保从你的工程中正确导入这两个函数
 from utils.data_generator import generate_synthetic_dataset, save_dataset
 from utils.logger import logger
+
+import os
+import numpy as np
+from utils.logger import logger
+
+
+def generate_load_test_datasets():
+    """
+    批量生成用于负载/压力测试的随机数据集
+    保持拓扑规模不变，仅改变请求到达率 arrival_rate
+    """
+
+    os.makedirs("data", exist_ok=True)
+
+    logger.info("\n>>> 开始生成负载压力测试数据集矩阵...")
+
+    # ===============================
+    # 固定网络规模
+    # ===============================
+    num_edge_nodes = 20
+    num_sensors = 10
+    num_users = 10
+    num_dt_services = 10
+
+    # ===============================
+    # 20个不同负载等级
+    # ===============================
+    arrival_rates = np.linspace(5, 100, 20)
+
+    total_requests = 500
+
+    for i, rate in enumerate(arrival_rates):
+
+        logger.info(
+            f"生成负载测试数据集 {i+1}/20 | "
+            f"arrival_rate={rate:.2f} req/s"
+        )
+
+        ds = generate_synthetic_dataset(
+            num_edge_nodes=num_edge_nodes,
+            num_sensors=num_sensors,
+            num_users=num_users,
+            num_dt_services=num_dt_services,
+            total_requests=total_requests,
+            arrival_rate=float(rate),
+            seed=2026
+        )
+
+        filename = f"data/load_dataset_lambda_{int(rate)}.pkl"
+
+        save_dataset(ds, filename)
+
+        # logger.info(f"数据集已保存至 {filename}")
+
+    logger.info("\n所有负载压力测试数据集生成完毕！")
 
 
 def generate_scalability_datasets():
@@ -46,4 +100,5 @@ def generate_scalability_datasets():
 
 
 if __name__ == "__main__":
-    generate_scalability_datasets()
+    # generate_scalability_datasets()
+    generate_load_test_datasets()

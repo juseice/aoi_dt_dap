@@ -98,7 +98,7 @@ def plot_interactive_core_map(csv_path, save_path):
 
 
 def plot_deployment_bubble_map():
-    csv_path = os.path.join(PROJECT_ROOT, "results", "exp_heatmap_data.csv")
+    csv_path = os.path.join(PROJECT_ROOT, "results", "exp_heatmap_data_old.csv")
     if not os.path.exists(csv_path):
         print("找不到热力数据 CSV，请先在 run_experiment.py 中运行 generate_spatial_heatmap_data！")
         return

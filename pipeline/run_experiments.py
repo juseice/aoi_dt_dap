@@ -60,36 +60,72 @@ def evaluate_agent_full(algo_name, agent, env, total_reqs):
 # ==========================================
 # 实验 1 & 2: 负载敏感性测试 (AoI & Cost)
 # ==========================================
-def run_exp_load_sensitivity(dataset):
-    logger.info("\n>>> 正在进行实验 1&2: 负载敏感性测试...")
-    load_levels = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]  # 不同请求数量级
+def run_exp_load_sensitivity():
+    """
+    运行负载敏感性测试：
+    遍历读取 data/ 目录下预先生成的 20 个不同到达率(Lambda)的数据集，
+    评估不同算法在不同拥塞压力下的抗压能力。
+    """
+    logger.info("\n>>> 正在进行实验 1&2: 负载敏感性测试 (Arrival Rate Lambda)...")
+
+    # 这里的 np.linspace 必须和生成数据集时的参数完全一致
+    arrival_rates = np.linspace(5, 100, 20)
     results = []
 
-    for load in load_levels:
+    # PPO 模型路径 (确保模型已经训练好)
+    ppo_path = os.path.join(PROJECT_ROOT, "environment", "models", "load_test")
+
+    for rate in arrival_rates:
+        rate_int = int(rate)
+        filename = f"load_dataset_lambda_{rate_int}.pkl"
+        filepath = os.path.join(PROJECT_ROOT, "data", filename)
+
+        # 1. 检查并加载对应 Lambda 的数据集
+        if not os.path.exists(filepath):
+            logger.warning(f"[跳过] 找不到数据集文件: {filepath}")
+            continue
+
+        logger.info(f"==> 正在评测负载压力 Lambda = {rate_int} req/s")
+        dataset = load_dataset(filepath)
+
+        total_reqs = len(dataset['request_stream'])  # 应该是 500
+
+        # 2. 初始化环境 (投入所有的 500 个请求)
         env = DTEngineEnv(
-            network=dataset['network'], users=dataset['users'],
-            task_chains=dataset['task_chains'], request_stream=dataset['request_stream'][:load],
-            total_reqs=load, alpha=0.5, beta=0.5  # 使用平衡权重
+            network=dataset['network'],
+            users=dataset['users'],
+            task_chains=dataset['task_chains'],
+            request_stream=dataset['request_stream'],
+            total_reqs=total_reqs,
+            alpha=0.5, beta=0.5  # 使用平衡权重进行测试
         )
 
-        ppo_path = os.path.join(PROJECT_ROOT, "environment", "models", "pareto", "ppo_a0.5_b0.5_large")
-
-        # 注册 Agent
+        # 3. 注册所有基准 Agent
         agents = {
             "Random": RandomAgent(env),
             "Greedy": GreedyAgent(env),
             "DP Real": DPAgent(env),
-            "PPO (Balanced)": PPO.load(ppo_path, env=env)
+            "PA-PPO": PPO.load(ppo_path, env=env)  # 统一改用论文里的名字
         }
 
+        # 4. 依次评测并记录结果
         for name, agent in agents.items():
-            m = evaluate_agent_full(name, agent, env, load)
-            m['Load'] = load
-            results.append(m)
+            try:
+                # 假设 evaluate_agent_full 返回一个包含 Success_Rate, Avg_AoI, Avg_Cost 等的字典
+                m = evaluate_agent_full(name, agent, env, total_reqs)
 
+                # 重点：记录的自变量是 Lambda (到达率)，而不是请求总数！
+                m['Lambda'] = rate_int
+                results.append(m)
+            except Exception as e:
+                logger.error(f"算法 {name} 在 Lambda={rate_int} 时发生错误: {e}")
+
+    # 5. 保存最终 CSV
     save_path = os.path.join(PROJECT_ROOT, "results", "exp_load_sensitivity.csv")
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     pd.DataFrame(results).to_csv(save_path, index=False)
-    logger.info(f"实验 1&2 完成，结果已保存至 {save_path}。")
+
+    logger.info(f"\n实验完成！负载抗压结果已成功保存至: {save_path}")
 
 
 # ==========================================
@@ -542,7 +578,7 @@ if __name__ == "__main__":
     # base_dataset_path = os.path.join(PROJECT_ROOT, "data", "dataset_large.pkl")
     # base_dataset = load_dataset(base_dataset_path)
     #
-    # run_exp_load_sensitivity(base_dataset)
+    run_exp_load_sensitivity()
     # run_exp_scalability()
     # run_exp_pareto_tradeoff(base_dataset)
 
@@ -554,7 +590,7 @@ if __name__ == "__main__":
 
     # run_real_world_pareto_analysis(real_dataset)
     # run_baseline_comparison(real_dataset)
-    run_timeseries_stress_test(real_dataset)
+    # run_timeseries_stress_test(real_dataset)
     # generate_spatial_heatmap_data(real_dataset)
     # generate_spatial_heatmap_data_greedy(real_dataset)
 

@@ -15,7 +15,7 @@ class DTEngineEnv(gym.Env):
     """
 
     def __init__(self, network, users, task_chains, request_stream=None, total_reqs=50, seed=42,
-                 alpha=0.5, beta=0.5):  # 【修改1】新增 alpha 和 beta 参数，默认各占一半
+                 alpha=0.5, beta=0.5):
         super(DTEngineEnv, self).__init__()
 
         self.network = network

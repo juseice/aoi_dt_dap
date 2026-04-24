@@ -3,6 +3,9 @@ from utils.visualization import plot_macro_topology, plot_infrastructure_topolog
 from inspect_pkl import inspect_network_nodes
 import matplotlib.pyplot as plt
 
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
+plt.rcParams['axes.unicode_minus'] = False
+
 def analyze_request_density(dataset):
     # 提取所有请求的触发时间
     times = [req.trigger_time for req in dataset['request_stream']]
