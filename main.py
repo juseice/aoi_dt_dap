@@ -1,16 +1,15 @@
 # [Main] 推进物理时间 (例如 t = 2.5s)，产生了一个新请求
 #   │
-#   ├──> [Main] 呼叫 [Solver]: "当前时间 2.5s，任务链来了，给我个最优节点。"
+#   ├──> [Main] 呼叫 [Solver]: "当前时间 2.5s，任务链来了，给我个最优节点列表。"
 #   │      │
-#   │      ├──> [Solver] 遍历备选 Node 1, 2, 3...
-#   │      │      ├──> 问 [Simulator]: "evaluate_step(Node 1, t=2.5s) 指标如何？"
-#   │      │      ├──> 问 [Simulator]: "evaluate_step(Node 2, t=2.5s) 指标如何？"
+#   │      ├──> [Solver] 遍历备选 node_list 组合...
+#   │      │      ├──> 问 [Simulator]: "evaluate_step([Node1,Node2], t=2.5s) 指标如何？"
 #   │      │      └──> ...
 #   │      │
-#   │      ├──> [Solver] 算了一遍 Score，发现 Node 2 分数最低（最好）。
-#   │      └──> [Solver] 返回给 [Main]: "选 Node 2，预计得分为 X。"
+#   │      ├──> [Solver] 算了一遍 Score，发现某组合分数最低（最好）。
+#   │      └──> [Solver] 返回给 [Main]: "选 [Node2, Node3]，预计得分为 X。"
 #   │
-#   ├──> [Main] 收到决策，命令 [Simulator]: "commit_step(Node 2, t=2.5s)！"
+#   ├──> [Main] 收到决策，命令 [Simulator]: "commit_step([Node2,Node3], t=2.5s)！"
 #   │      └──> [Simulator] 真实更新内部时间轴和部署位置。
 #   │
 #   └──> [Main] 打印日志，继续循环，等待下一个请求...
@@ -24,12 +23,10 @@ from optimization.random_solver import select_random_node
 from optimization.dp_solver import solve_dp_offline
 from utils.logger import logger
 from utils.visualization import plot_network_topology, plot_simulation_results, plot_comparative_results
-from environment.event import generate_poisson_requests
-from environment.rl_env import DTEngineEnv
-from stable_baselines3 import PPO
-from environment.rl_env import DTEngineEnv
 from utils.data_generator import load_dataset
 from utils.analyzer import save_simulation_results, generate_summary_report
+# from stable_baselines3 import PPO
+# from environment.rl_env import DTEngineEnv
 
 
 def setup_clean_environment():
@@ -89,37 +86,30 @@ def run_evaluation(algo_name, solver_func, total_reqs=15, seed=42):
     """
     logger.info(f"\n========== 开始评测算法: {algo_name} ==========")
 
-    # 1. 重置物理世界
-    logger.info("初始化网络拓扑...")
-    # net, users, task_chains = setup_clean_environment()
-    # 2. 生成固定的事件流 (只要 seed 相同，请求的时间、用户、任务完全一致)
-    # request_stream = generate_poisson_requests(
-    #     users=users, task_chains=task_chains,
-    #     arrival_rate=0.5, total_requests=total_reqs, seed=seed
-    # )
     dataset = load_dataset("data/dataset_debug.pkl")
-
     net = dataset['network']
     users = dataset['users']
     task_chains = dataset['task_chains']
     request_stream = dataset['request_stream']
 
-    # plot_network_topology(net)  # 如果你想看图，可以把这行取消注释
     sim = Simulator(net, dt_ttl=10.0)
-
     alpha, beta = 1.0, 1.0
     history = []
 
-    # 如果是全局最优的离线 DP 算法，直接出结果
+    # ==========================================
+    # DP 离线算法分支
+    # ==========================================
     if "DP" in algo_name:
         if "Oracle" in algo_name:
             history = solve_dp_offline(net, request_stream, alpha, beta)
             for step in history:
                 logger.info(
-                    f"[请求 {step['req']}] DP规划部署 Node {step['node_id']} | AoI={step['aoi']:.2f}, Cost={step['cost']}")
+                    f"[请求 {step['req']}] DP规划部署 Nodes {step['node_ids']} | "
+                    f"AoI={step['aoi']:.2f}, Cost={step['cost']:.2f}"
+                )
             return history
         else:
-            # 先拿到理想路线图
+            # DP Real：先拿到理想路线图，再在真实物理世界执行
             dp_plan = solve_dp_offline(net, request_stream, alpha, beta)
             if not dp_plan:
                 logger.error("DP 求解失败返回空计划，DP Real 无法执行！")
@@ -127,133 +117,110 @@ def run_evaluation(algo_name, solver_func, total_reqs=15, seed=42):
 
             for i, req in enumerate(request_stream):
                 sim.cleanup_expired_dts(req.trigger_time)
-                # 强行提取 DP 计划中的目标节点
-                planned_node_id = dp_plan[i]['node_id']
-                target_node = net.get_node(planned_node_id)
+
+                planned_node_ids = dp_plan[i]['node_ids']
+                node_list = [net.get_node(nid) for nid in planned_node_ids]
 
                 try:
-                    # 强行在物理世界执行！(这里会自动产生真实的排队时延)
                     real_sense, real_queue, real_comp, real_res, real_mig = sim.commit_step(
-                        target_node, req.task_chain, req.user, req.trigger_time
+                        node_list, req.task_chain, req.user, req.trigger_time
                     )
-
                     real_aoi = estimate_aoi(real_sense, real_queue, real_comp, real_res)
-                    real_cost = compute_cost(target_node, real_comp, req.task_chain, real_mig)
+                    real_cost = compute_cost(node_list, req.task_chain, real_mig)
 
                     history.append({
                         'req': req.id, 'aoi': real_aoi, 'cost': real_cost, 'migrated': real_mig
                     })
                     logger.info(
-                        f"[请求 {req.id}] DP 现实执行 Node {target_node.id} | 真实排队={real_queue:.2f}s, 真实 AoI={real_aoi:.2f}")
-
+                        f"[请求 {req.id}] DP 现实执行 Nodes {planned_node_ids} | "
+                        f"真实排队={real_queue:.2f}s, 真实 AoI={real_aoi:.2f}"
+                    )
                 except RuntimeError as e:
-                    # 捕获内存不足导致的物理崩溃
                     logger.error(f"[请求 {req.id}] DP 部署失败：{e} (请求被丢弃)")
 
             return history
 
-    if "PPO" in algo_name:
-        try:
-            # 加载你刚才训练好的大脑
-            model = PPO.load("environment/models/ppo_dt_deployment")
-        except FileNotFoundError:
-            logger.error("找不到 PPO 模型文件！请先运行 train_ppo.py")
-            return []
+    # ==========================================
+    # PPO 强化学习分支（暂时注释）
+    # ==========================================
+    # if "PPO" in algo_name:
+    #     try:
+    #         model = PPO.load("environment/models/ppo_dt_deployment")
+    #     except FileNotFoundError:
+    #         logger.error("找不到 PPO 模型文件！请先运行 train_ppo.py")
+    #         return []
+    #
+    #     env = DTEngineEnv(net, users, task_chains, total_reqs=len(request_stream), seed=seed)
+    #     obs, _ = env.reset()
+    #
+    #     for req in request_stream:
+    #         action, _ = model.predict(obs, deterministic=True)
+    #         obs, reward, terminated, truncated, info = env.step(action)
+    #
+    #         history.append({
+    #             'req': info['req_id'],
+    #             'aoi': info['aoi'],
+    #             'cost': info['cost'],
+    #             'migrated': info.get('migrated', False)
+    #         })
+    #         logger.info(
+    #             f"[请求 {info['req_id']}] PPO 部署 Action {action} | "
+    #             f"AoI={info['aoi']:.2f}, Cost={info['cost']:.2f}"
+    #         )
+    #         if terminated:
+    #             break
+    #
+    #     return history
 
-        # 实例化环境 (一定要用和环境同样的 seed，保证考卷一样)
-        env = DTEngineEnv(net, users, task_chains, total_reqs=len(request_stream), seed=seed)
-        obs, _ = env.reset()
-
-        for req in request_stream:
-            # deterministic=True 表示取消探索，每次都严格选最优动作
-            action, _ = model.predict(obs)
-            obs, reward, terminated, truncated, info = env.step(action)
-
-            history.append({
-                'req': info['req_id'],
-                'aoi': info['aoi'],
-                'cost': info['cost'],
-                'migrated': info.get('migrated', False)
-            })
-            logger.info(
-                f"[请求 {info['req_id']}] PPO 部署 Node {action} | 排队(含)=0.0, AoI={info['aoi']:.2f}, Cost={info['cost']:.2f}")
-
-            if terminated:
-                break
-
-        return history
-
-    # 3. 开始仿真循环
+    # ==========================================
+    # 在线算法通用循环 (Random / Greedy)
+    # ==========================================
     for req in request_stream:
         evicted_dts = sim.cleanup_expired_dts(req.trigger_time)
-        for dt_id, node_id, mem_req in evicted_dts:
+        for dt_id, node_ids, memories in evicted_dts:
+            total_mem = sum(memories)
             logger.info(
-                f" [内存回收] t={req.trigger_time:.1f}s | {dt_id} 因超时未访问被卸载，Node {node_id} 恢复 {mem_req}G 内存")
+                f" [内存回收] t={req.trigger_time:.1f}s | {dt_id} 因超时未访问被卸载，"
+                f"Nodes {node_ids} 共回收 {total_mem:.1f}G 内存"
+            )
 
-        best_node, score, estimated_metrics = solver_func(
+        best_node_list, score, estimated_metrics = solver_func(
             sim, net, req.task_chain, req.user, alpha, beta, req.trigger_time
         )
 
-        if best_node is not None:
+        if best_node_list is not None:
             real_sense, real_queue, real_comp, real_res, real_mig = sim.commit_step(
-                best_node, req.task_chain, req.user, req.trigger_time
+                best_node_list, req.task_chain, req.user, req.trigger_time
             )
             real_aoi = estimate_aoi(real_sense, real_queue, real_comp, real_res)
-            real_cost = compute_cost(best_node, real_comp, req.task_chain, real_mig)
+            real_cost = compute_cost(best_node_list, req.task_chain, real_mig)
+
             history.append({
                 'req': req.id,
                 'aoi': real_aoi,
                 'cost': real_cost,
                 'migrated': real_mig
             })
-            logger.info(f"[请求 {req.id}] 部署 Node {best_node.id} | 真实 AoI={real_aoi:.2f}, 真实 Cost={real_cost:.2f}")
+            node_ids_str = [n.id for n in best_node_list]
+            logger.info(
+                f"[请求 {req.id}] 部署 Nodes {node_ids_str} | "
+                f"真实 AoI={real_aoi:.2f}, 真实 Cost={real_cost:.2f}"
+            )
         else:
-            logger.warning(f"[请求 {req.id}] 部署失败：资源枯竭或约束不满足")\
+            logger.warning(f"[请求 {req.id}] 部署失败：资源枯竭或约束不满足")
 
     return history
-
-
-def test_rl_environment():
-    logger.info("\n========== 测试强化学习环境接口 ==========")
-    net, users, task_chains = setup_clean_environment()  # 之前的建图函数
-
-    # 实例化环境
-    env = DTEngineEnv(net, users, task_chains, total_reqs=10, seed=42)
-
-    # 1. 游戏重置 (获得初始状态)
-    obs, info = env.reset()
-    logger.info(f"初始状态向量: {obs}")
-
-    total_reward = 0
-    done = False
-
-    # 2. 交互循环 (马尔可夫决策过程 MDP)
-    while not done:
-        # 智能体思考：这里我们先用 env.action_space.sample() 随机抛骰子选一个动作
-        # 以后这里就会替换成 model.predict(obs) ！！
-        action = env.action_space.sample()
-
-        # 告诉环境执行动作
-        obs, reward, terminated, truncated, info = env.step(action)
-
-        done = terminated or truncated
-        total_reward += reward
-
-        logger.info(f"执行动作(节点索引): {action} | 获得 Reward: {reward:.2f} | Info: {info}")
-
-    logger.info(f"回合结束！累计 Reward: {total_reward:.2f}")
 
 
 def main():
     logger.info("正在加载测试数据集...")
     dataset = load_dataset("data/dataset_debug.pkl")
 
-    # 动态获取当前考卷的请求总数
     TOTAL_REQUESTS = len(dataset['request_stream'])
     COMMON_SEED = dataset['config']['seed']
     logger.info(f"数据集加载完毕：包含 {TOTAL_REQUESTS} 个请求。")
 
-    # 1. 跑 Baseline (随机策略)
+    # 1. 随机策略
     history_random = run_evaluation(
         algo_name="Random Baseline",
         solver_func=select_random_node,
@@ -261,7 +228,7 @@ def main():
         seed=COMMON_SEED
     )
 
-    # 2. 贪心最优策略
+    # 2. 贪心穷举策略
     history_best = run_evaluation(
         algo_name="Greedy Best",
         solver_func=select_best_node,
@@ -269,6 +236,7 @@ def main():
         seed=COMMON_SEED
     )
 
+    # 3. DP 离线最优（理想 Oracle）
     history_dp = run_evaluation(
         "DP Optimal (Oracle)",
         solve_dp_offline,
@@ -276,6 +244,7 @@ def main():
         COMMON_SEED
     )
 
+    # 4. DP 现实执行
     history_dp_real = run_evaluation(
         "DP Real (Simulated)",
         solve_dp_offline,
@@ -283,33 +252,30 @@ def main():
         COMMON_SEED
     )
 
-    history_ppo = run_evaluation(
-        "PPO (DRL)",
-        None,
-        TOTAL_REQUESTS,
-        COMMON_SEED
-    )
+    # 5. PPO 强化学习（暂时注释）
+    # history_ppo = run_evaluation(
+    #     "PPO (DRL)",
+    #     None,
+    #     TOTAL_REQUESTS,
+    #     COMMON_SEED
+    # )
 
-    # 3. 合并数据
     all_histories = {
         'Random Baseline': history_random,
         'Greedy Best': history_best,
         'DP Ideal': history_dp,
         'DP Real': history_dp_real,
-        'PPO (DRL)': history_ppo
+        # 'PPO (DRL)': history_ppo,
     }
 
-    # 1. 结果落盘保存为 JSON，以后随时可以写脚本读取这个文件画图，不用重新跑仿真
     save_simulation_results(all_histories, filename="results/latest_simulation.json")
-
-    # 2. 打印酷炫的终端宏观汇总报表
     generate_summary_report(all_histories, TOTAL_REQUESTS)
 
-    # 3. 依然保留画图功能
     logger.info("仿真结束，正在生成对比可视化报表...")
     plot_comparative_results(all_histories)
 
     # test_rl_environment()
+
 
 if __name__ == "__main__":
     main()

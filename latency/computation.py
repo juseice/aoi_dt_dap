@@ -5,9 +5,13 @@ def compute_task_delay(task, node):
 
 
 def compute_chain_delay(task_chain, node):
-    total_delay = 0
+    """All tasks on the same node (legacy / single-node placement)."""
+    return sum(compute_task_delay(task, node) for task in task_chain.tasks)
 
-    for task in task_chain.tasks:
-        total_delay += compute_task_delay(task, node)
 
-    return total_delay
+def compute_chain_delay_distributed(task_chain, node_list):
+    """Each task in the chain runs on its corresponding node in node_list."""
+    return sum(
+        compute_task_delay(task, node)
+        for task, node in zip(task_chain.tasks, node_list)
+    )
