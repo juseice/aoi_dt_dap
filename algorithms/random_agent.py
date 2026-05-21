@@ -33,8 +33,11 @@ class RandomAgent:
         # 1. 过滤阶段：找出所有合法的候选节点索引
         # ==========================================
         for idx, node in enumerate(self.env.edge_nodes):
-            # C2 资源约束校验
-            if not check_memory_constraint(node, req.task_chain, simulator):
+            # C2 资源约束校验：链上所有子任务均部署在同一节点，逐任务检查内存
+            if not all(
+                check_memory_constraint(node, task, req.task_chain.id, i, simulator)
+                for i, task in enumerate(req.task_chain.tasks)
+            ):
                 continue
 
             # C4 带宽约束校验 (传感器 -> 边缘节点)

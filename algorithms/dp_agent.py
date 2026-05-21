@@ -49,14 +49,16 @@ class DPAgent:
             logger.warning("[DPAgent] 预定计划已耗尽或失效，执行无效动作。")
             return 0, None
 
-        # 1. 查阅 DP 锦囊，获取当前步应该部署的目标物理机 ID
-        planned_node_id = self.oracle_plan[self.current_step]['node_id']
+        # 1. 查阅 DP 锦囊，获取当前步应该部署的节点 ID 列表（每任务一个）
+        planned_node_ids = self.oracle_plan[self.current_step]['node_ids']
+        # RL env 使用单节点动作，取链首节点 ID 作为动作目标
+        primary_node_id = planned_node_ids[0]
 
         # 2. 将真实的物理节点 ID 转换为 Env 需要的动作索引 (Action Index)
         try:
-            action_idx = [n.id for n in self.env.edge_nodes].index(planned_node_id)
+            action_idx = [n.id for n in self.env.edge_nodes].index(primary_node_id)
         except ValueError:
-            logger.error(f"[DPAgent] 严重错误：DP 计算出的节点 {planned_node_id} 不在环境可用节点中！")
+            logger.error(f"[DPAgent] 严重错误：DP 计算出的节点 {primary_node_id} 不在环境可用节点中！")
             action_idx = 0
 
         # 3. 步数加一，准备下一次查询

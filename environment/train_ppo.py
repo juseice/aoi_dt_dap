@@ -53,6 +53,20 @@ class ConvergenceLoggerCallback(BaseCallback):
         logger.info(f"模型 {self.model_name} 的收敛数据已保存至 {csv_path}")
 
 
+def _make_ppo_env_fn(network, users, task_chains, total_reqs, alpha, beta):
+    """返回无参工厂函数，避免 for 循环闭包的 late-binding 问题。"""
+    return lambda: DTEngineEnv(
+        network=network,
+        users=users,
+        task_chains=task_chains,
+        request_stream=None,
+        total_reqs=total_reqs,
+        seed=None,
+        alpha=alpha,
+        beta=beta
+    )
+
+
 def train_real_world_pareto():
     logger.info("开始基于真实数据分布训练帕累托模型矩阵...")
 
@@ -63,45 +77,48 @@ def train_real_world_pareto():
 
     dataset = load_dataset(dataset_path)
 
-    # 真实数据环境下，增加训练步数
-    TOTAL_TIMESTEPS = 50000
+    TOTAL_TIMESTEPS = 100000
     TRAIN_REQS_PER_EPISODE = 500
 
-    # 帕累托权重组合
-    # pareto_weights = [(0.9, 0.1), (0.7, 0.3), (0.5, 0.5), (0.3, 0.7), (0.1, 0.9)]
-    pareto_weights = [(0.1, 0.9)]
+    pareto_weights = [(0.9, 0.1), (0.7, 0.3), (0.5, 0.5), (0.3, 0.7), (0.1, 0.9)]
     num_cpus = min(8, multiprocessing.cpu_count())
     logger.info(f"开启 CPU 多进程加速，同时运行 {num_cpus} 个平行仿真环境！")
 
-    # 创建保存目录
     model_dir = os.path.join(PROJECT_ROOT, "environment", "models", "pareto_real")
     os.makedirs(model_dir, exist_ok=True)
+    tb_dir = os.path.join(PROJECT_ROOT, "results", "tensorboard_logs")
+    os.makedirs(tb_dir, exist_ok=True)
 
     for alpha, beta in tqdm(pareto_weights, desc="总体模型训练进度", colour="green"):
         model_name = f"ppo_real_a{alpha}_b{beta}"
         logger.info(f"\n>>> 正在训练真实数据模型: {model_name} (α={alpha}, β={beta}) <<<")
 
-        # 使用真实数据集的物理网络、用户、任务链
-        env_maker = lambda: DTEngineEnv(
-            network=dataset['network'],
-            users=dataset['users'],
-            task_chains=dataset['task_chains'],
-            request_stream=None,  # 训练时使用随机抽样
-            total_reqs=TRAIN_REQS_PER_EPISODE,
-            seed=None,
-            alpha=alpha,
-            beta=beta
+        vec_env = make_vec_env(
+            _make_ppo_env_fn(dataset['network'], dataset['users'], dataset['task_chains'],
+                             TRAIN_REQS_PER_EPISODE, alpha, beta),
+            n_envs=num_cpus,
+            vec_env_cls=SubprocVecEnv
         )
 
-        vec_env = make_vec_env(env_maker, n_envs=num_cpus, vec_env_cls=SubprocVecEnv)
+        model = PPO(
+            "MlpPolicy", vec_env,
+            learning_rate=3e-4,
+            n_steps=2048,
+            batch_size=64,
+            n_epochs=10,
+            verbose=0,
+            policy_kwargs=dict(net_arch=[256, 256]),
+            tensorboard_log=tb_dir
+        )
 
-        model = PPO("MlpPolicy", vec_env, verbose=0, learning_rate=3e-4)
-        model.learn(total_timesteps=TOTAL_TIMESTEPS, progress_bar=True)
+        callback = ConvergenceLoggerCallback(model_name=model_name)
+        model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=callback, progress_bar=True)
 
-        # 保存模型
         save_path = os.path.join(model_dir, model_name)
         model.save(save_path)
         logger.info(f"模型已保存至: {save_path}.zip")
+
+        vec_env.close()
 
     logger.info("\n真实数据帕累托模型完毕！")
 
@@ -305,8 +322,5 @@ def train_and_evaluate_ppo():
 
 
 if __name__ == "__main__":
-    # train_real_world_pareto()
-    # train_pareto_models()
-    # train_scalability_models()
-    train_and_evaluate_ppo()
+    train_real_world_pareto()
 

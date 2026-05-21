@@ -7,6 +7,8 @@ from latency import estimate_aoi
 from objective import compute_cost
 from environment.event import generate_poisson_requests
 from environment.simulator import Simulator
+from constraints.resource import check_memory_constraint
+from constraints.bandwidth import check_bandwidth_constraint
 
 
 class DTEngineEnv(gym.Env):
@@ -57,8 +59,9 @@ class DTEngineEnv(gym.Env):
         # 假设我们提取的特征长度为：
         # 1 (用户ID) + 1 (传感器ID) + 1 (该DT上次部署节点) + 1 (上次的AoI) + num_nodes (各节点可用内存)
         # 2. 状态空间维度精准计算
-        # U_t (One-Hot) + S_t (One-Hot) + H_{t-1} (One-Hot) + M_t (归一化内存) + Delta_{t-1} (归一化AoI) + s_to_n + n_to_u
-        self.obs_dim = self.num_users + self.num_sensors + self.num_nodes + self.num_nodes + 1 + self.num_nodes + self.num_nodes
+        # U_t (One-Hot) + S_t (One-Hot) + H_{t-1} (One-Hot) + M_t (归一化内存) + Delta_{t-1} (归一化AoI)
+        # + s_to_n + n_to_u + Q_t (各节点归一化排队等待时长，关键负载均衡信号)
+        self.obs_dim = self.num_users + self.num_sensors + self.num_nodes + self.num_nodes + 1 + self.num_nodes + self.num_nodes + self.num_nodes
 
         # 所有的状态值都被严格限制在 0.0 到 1.0 之间 (极其利于神经网络收敛)
         self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(self.obs_dim,), dtype=np.float32)
@@ -69,7 +72,8 @@ class DTEngineEnv(gym.Env):
 
         self.Z = 20.0
         self.R_finish = 10.0
-        self.R_penalty = -5.0
+        self.R_penalty = -30.0   # 加大失败惩罚，使其远超成功奖励上限，迫使模型避开无效动作
+        self.mig_cost_scale = 0.3  # 迁移成本在 reward 中的折扣系数（0~1），降低扎堆倾向
 
         # 预先提取网络中的全局最强属性，用于计算公式(8)的理论极限
         self.max_compute = max([n.compute_power for n in self.edge_nodes])
@@ -163,9 +167,9 @@ class DTEngineEnv(gym.Env):
 
         # 3. H_t-1: 该 DT 实例上一次部署在哪里？
         h_vec = np.zeros(self.num_nodes, dtype=np.float32)
-        prev_node_id = self.simulator.get_dt_placement(req.task_chain.id)
-        if prev_node_id is not None:
-            node_idx = [n.id for n in self.edge_nodes].index(prev_node_id)
+        prev_node_ids = self.simulator.get_dt_placement(req.task_chain.id)
+        if prev_node_ids is not None:
+            node_idx = [n.id for n in self.edge_nodes].index(prev_node_ids[0])
             h_vec[node_idx] = 1.0
 
         # 4. M_t: 各节点可用内存归一化 (当前内存 / 最大内存)
@@ -198,8 +202,17 @@ class DTEngineEnv(gym.Env):
         s_to_n_dist = np.clip(s_to_n_dist / 10.0, 0.0, 1.0)
         n_to_u_dist = np.clip(n_to_u_dist / 10.0, 0.0, 1.0)
 
+        # 7. Q_t: 各节点当前排队等待时长（归一化）
+        # 用 node_available_time - 当前请求到达时间 来估算排队积压
+        # 这是负载均衡的核心信号：Agent 看到节点 A 堵车、节点 B 空闲，才能学会分流
+        MAX_QUEUE_SCALE = 10.0  # 归一化上限（秒），超过此值的等待时间均视为严重拥塞
+        q_vec = np.zeros(self.num_nodes, dtype=np.float32)
+        for i, node in enumerate(self.edge_nodes):
+            wait = max(0.0, self.simulator.node_available_time[node.id] - req.trigger_time)
+            q_vec[i] = np.clip(wait / MAX_QUEUE_SCALE, 0.0, 1.0)
+
         # 将所有特征拼接成一个扁平的一维数组
-        obs = np.concatenate([u_vec, s_vec, h_vec, m_vec, aoi_vec, s_to_n_dist, n_to_u_dist])
+        obs = np.concatenate([u_vec, s_vec, h_vec, m_vec, aoi_vec, s_to_n_dist, n_to_u_dist, q_vec])
         return obs
 
     def reset(self, seed=None, options=None):
@@ -226,13 +239,49 @@ class DTEngineEnv(gym.Env):
 
         return self._get_obs(self.current_req), {}
 
+    def action_masks(self) -> np.ndarray:
+        """
+        返回当前步的合法动作布尔掩码（True=可用，False=无效）。
+        供 sb3-contrib MaskablePPO/MaskableDQN 使用，也可在 debug 中直接调用。
+        """
+        req = self.current_req
+        tasks = req.task_chain.tasks
+        sensor_id = req.task_chain.sensor_id
+        sensor = self.network.get_node(sensor_id)
+        masks = np.zeros(self.num_nodes, dtype=bool)
+
+        for idx, node in enumerate(self.edge_nodes):
+            # 内存约束：链上所有子任务均需满足
+            if not all(
+                check_memory_constraint(node, task, req.task_chain.id, i, self.simulator)
+                for i, task in enumerate(tasks)
+            ):
+                continue
+            # 带宽约束：传感器 -> 节点
+            if not check_bandwidth_constraint(
+                self.network, sensor_id, node.id,
+                sensor.data_size, req.task_chain.required_bandwidth
+            ):
+                continue
+            # 连通性约束：节点 -> 用户
+            if not self.network.get_path(node.id, req.user.id, 1.0):
+                continue
+            masks[idx] = True
+
+        # 若无任何合法节点，全部置 True 让环境自然触发惩罚（避免 SB3 报错）
+        if not masks.any():
+            masks[:] = True
+        return masks
+
     def step(self, action):
         """
         步进函数：RL 智能体给出一个 action，环境执行并返回 reward 和下一个状态
         """
         req = self.current_req
         # 1. 将网络输出的整数 (0, 1, 2) 映射回真实的物理节点对象
-        target_node = self.edge_nodes[action]
+        # Simulator 期望 list[EdgeNode]（每任务一个节点），RL 选单节点承载全链所有子任务
+        chosen_node = self.edge_nodes[action]
+        target_node = [chosen_node] * len(req.task_chain.tasks)
 
         # 先执行垃圾回收推演时间
         self.simulator.cleanup_expired_dts(req.trigger_time)
@@ -243,28 +292,34 @@ class DTEngineEnv(gym.Env):
                 target_node, req.task_chain, req.user, req.trigger_time
             )
 
-            # 计算真实指标
+            # 计算真实指标（用于 info 上报，评测时保持真实值）
             aoi = estimate_aoi(real_sense, real_queue, real_comp, real_res)
-            cost = compute_cost(target_node, real_comp, req.task_chain, real_mig)
+            cost = compute_cost(target_node, req.task_chain, bool(real_mig))
 
-            # Reward (LB version)
-            # lb_j = self._compute_lower_bound(req)
-            # actual_obj = max(self.alpha * cost + self.beta * aoi, 1e-5)
-            #
-            # # rt = Z * LB / (alpha*C + beta*D) + R_finish
-            # reward = (self.Z * lb_j) / actual_obj + self.R_finish
-            # success = True
+            # Reward 专用 cost：迁移惩罚按 mig_cost_scale 折扣，
+            # 避免 agent 因迁移代价过大而永远扎堆在同一节点
+            reward_cost = compute_cost(target_node, req.task_chain, migration=False)
+            if real_mig:
+                mig_addon = sum(t.deployment_cost for t in req.task_chain.tasks)
+                reward_cost += mig_addon * self.mig_cost_scale
 
             # normalize version
             norm_aoi = float(np.clip((aoi - self.min_env_aoi) / (self.max_env_aoi - self.min_env_aoi + 1e-8), 0.0, 1.0))
             norm_cost = float(
-                np.clip((cost - self.min_env_cost) / (self.max_env_cost - self.min_env_cost + 1e-8), 0.0, 1.0))
+                np.clip((reward_cost - self.min_env_cost) / (self.max_env_cost - self.min_env_cost + 1e-8), 0.0, 1.0))
 
             joint_cost = self.alpha * norm_aoi + self.beta * norm_cost
 
             # 线性奖励：越接近理论下限，cost越接近0，reward越接近 1.0
             # 加上完成奖励 R_finish
             reward = (1.0 - joint_cost) * self.Z + self.R_finish
+
+            # 即时排队惩罚：commit 之前节点的等待时间越长，惩罚越大
+            # 这让模型在当步就感受到"选堵车节点"的代价，而不是等下一步 AoI 变大才感知
+            # commit_step 已改变 node_available_time，用 real_queue 直接表示本次等待
+            # norm_queue = float(np.clip(real_queue / (self.max_env_aoi + 1e-8), 0.0, 1.0))
+            # reward -= norm_queue * self.Z * 0.5   # 最多额外扣 Z/2（与失败惩罚不同量级）
+
             success = True
 
         except RuntimeError as e:

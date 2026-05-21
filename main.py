@@ -25,8 +25,11 @@ from utils.logger import logger
 from utils.visualization import plot_network_topology, plot_simulation_results, plot_comparative_results
 from utils.data_generator import load_dataset
 from utils.analyzer import save_simulation_results, generate_summary_report
-# from stable_baselines3 import PPO
-# from environment.rl_env import DTEngineEnv
+from stable_baselines3 import PPO, DQN
+from environment.rl_env import DTEngineEnv
+from algorithms.random_agent import RandomAgent
+from algorithms.greedy_agent import GreedyAgent
+from algorithms.dp_agent import DPAgent
 
 
 def setup_clean_environment():
@@ -80,13 +83,56 @@ def setup_clean_environment():
     return net, users, task_chains
 
 
+def run_rl_evaluation(algo_name, model, dataset, total_reqs, seed):
+    """
+    使用 Gym 环境统一评估 RL 模型（PPO / DQN）。
+    与 run_evaluation 返回相同格式的 history 列表，便于合并对比。
+    """
+    logger.info(f"\n========== 开始评测算法: {algo_name} ==========")
+
+    env = DTEngineEnv(
+        network=dataset['network'],
+        users=dataset['users'],
+        task_chains=dataset['task_chains'],
+        request_stream=None,
+        total_reqs=total_reqs,
+        seed=seed,
+        alpha=1.0,
+        beta=1.0
+    )
+    obs, _ = env.reset(seed=seed)
+    history = []
+    done = False
+
+    while not done:
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
+
+        history.append({
+            'req':      info['req_id'],
+            'aoi':      info['aoi'],
+            'cost':     info['cost'],
+            'migrated': info.get('migrated', False)
+        })
+        if not (info['aoi'] == float('inf')):
+            logger.info(
+                f"[{algo_name}] 请求 {info['req_id']} -> Node {action} | "
+                f"AoI={info['aoi']:.2f}, Cost={info['cost']:.4f}"
+            )
+        else:
+            logger.warning(f"[{algo_name}] 请求 {info['req_id']} 部署失败")
+
+    return history
+
+
 def run_evaluation(algo_name, solver_func, total_reqs=15, seed=42):
     """
     在一个干净的环境中运行指定的算法
     """
     logger.info(f"\n========== 开始评测算法: {algo_name} ==========")
 
-    dataset = load_dataset("data/dataset_debug.pkl")
+    dataset = load_dataset("data/dataset_real_30.pkl")
     net = dataset['network']
     users = dataset['users']
     task_chains = dataset['task_chains']
@@ -212,69 +258,148 @@ def run_evaluation(algo_name, solver_func, total_reqs=15, seed=42):
     return history
 
 
+def make_eval_env(dataset, total_reqs, seed, alpha=1.0, beta=1.0):
+    """创建用于评估的 DTEngineEnv 实例。"""
+    return DTEngineEnv(
+        network=dataset['network'],
+        users=dataset['users'],
+        task_chains=dataset['task_chains'],
+        request_stream=None,
+        total_reqs=total_reqs,
+        seed=seed,
+        alpha=alpha,
+        beta=beta
+    )
+
+
+def run_agent_evaluation(algo_name, agent, env, seed):
+    """
+    在指定 Gym 环境中运行任意 agent（SB3 模型或自定义 Agent），返回历史记录。
+    agent 必须提供 predict(obs, deterministic=True) -> (action, state) 接口。
+    """
+    logger.info(f"\n========== 开始评测算法: {algo_name} ==========")
+    obs, _ = env.reset(seed=seed)
+    history = []
+    done = False
+
+    while not done:
+        action, _ = agent.predict(obs, deterministic=True)
+        action = int(action)
+        obs, reward, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
+
+        aoi = info['aoi']
+        cost = info['cost']
+        history.append({
+            'req':      info['req_id'],
+            'aoi':      aoi,
+            'cost':     cost,
+            'migrated': info.get('migrated', False)
+        })
+        if aoi != float('inf'):
+            logger.info(
+                f"[{algo_name}] 请求 {info['req_id']} -> Node {action} | "
+                f"AoI={aoi:.2f}, Cost={cost:.4f}"
+            )
+        else:
+            logger.warning(f"[{algo_name}] 请求 {info['req_id']} 部署失败")
+
+    return history
+
+
 def main():
+    import os
     logger.info("正在加载测试数据集...")
-    dataset = load_dataset("data/dataset_debug.pkl")
+    dataset = load_dataset("data/dataset_real_30.pkl")
 
-    TOTAL_REQUESTS = len(dataset['request_stream'])
+    TOTAL_REQUESTS = 200
+    ALPHA, BETA = 1.0, 1.0
     COMMON_SEED = dataset['config']['seed']
-    logger.info(f"数据集加载完毕：包含 {TOTAL_REQUESTS} 个请求。")
+    logger.info(f"数据集加载完毕，将评估前 {TOTAL_REQUESTS} 个请求。")
 
+    all_histories = {}
+
+    # ==========================================
     # 1. 随机策略
-    history_random = run_evaluation(
-        algo_name="Random Baseline",
-        solver_func=select_random_node,
-        total_reqs=TOTAL_REQUESTS,
-        seed=COMMON_SEED
+    # ==========================================
+    env = make_eval_env(dataset, TOTAL_REQUESTS, COMMON_SEED, ALPHA, BETA)
+    all_histories['Random'] = run_agent_evaluation(
+        "Random", RandomAgent(env), env, COMMON_SEED
     )
 
-    # 2. 贪心穷举策略
-    history_best = run_evaluation(
-        algo_name="Greedy Best",
-        solver_func=select_best_node,
-        total_reqs=TOTAL_REQUESTS,
-        seed=COMMON_SEED
+    # ==========================================
+    # 2. 贪心策略（O(|nodes|) 单节点贪心，避免指数级搜索）
+    # ==========================================
+    env = make_eval_env(dataset, TOTAL_REQUESTS, COMMON_SEED, ALPHA, BETA)
+    all_histories['Greedy'] = run_agent_evaluation(
+        "Greedy", GreedyAgent(env), env, COMMON_SEED
     )
 
-    # 3. DP 离线最优（理想 Oracle）
-    history_dp = run_evaluation(
-        "DP Optimal (Oracle)",
-        solve_dp_offline,
-        TOTAL_REQUESTS,
-        COMMON_SEED
-    )
+    # ==========================================
+    # 3. DP Oracle（离线最优，理论上界）
+    # ==========================================
+    # 真实数据不适用dp
+    # env = make_eval_env(dataset, TOTAL_REQUESTS, COMMON_SEED, ALPHA, BETA)
+    # env.reset(seed=COMMON_SEED)          # 提前 reset 以生成 request_stream
+    # dp_oracle = DPAgent(env)
+    # if dp_oracle.valid:
+    #     raw = dp_oracle.get_oracle_history()
+    #     all_histories['DP Oracle'] = [
+    #         {'req': s['req'], 'aoi': s['aoi'], 'cost': s['cost'],
+    #          'migrated': s.get('migrated', False)}
+    #         for s in raw
+    #     ]
+    #     logger.info(f"[DP Oracle] 获取到 {len(all_histories['DP Oracle'])} 条理论最优记录")
+    # else:
+    #     logger.warning("[DP Oracle] DP 求解失败，跳过。")
 
-    # 4. DP 现实执行
-    history_dp_real = run_evaluation(
-        "DP Real (Simulated)",
-        solve_dp_offline,
-        TOTAL_REQUESTS,
-        COMMON_SEED
-    )
+    # ==========================================
+    # 4. DP Real（在线执行 DP 锦囊，受真实排队影响）
+    # ==========================================
+    # env = make_eval_env(dataset, TOTAL_REQUESTS, COMMON_SEED, ALPHA, BETA)
+    # env.reset(seed=COMMON_SEED)
+    # dp_real = DPAgent(env)
+    # if dp_real.valid:
+    #     all_histories['DP Real'] = run_agent_evaluation(
+    #         "DP Real", dp_real, env, COMMON_SEED
+    #     )
+    # else:
+    #     logger.warning("[DP Real] DP 求解失败，跳过。")
 
-    # 5. PPO 强化学习（暂时注释）
-    # history_ppo = run_evaluation(
-    #     "PPO (DRL)",
-    #     None,
-    #     TOTAL_REQUESTS,
-    #     COMMON_SEED
-    # )
+    # ==========================================
+    # 5. PPO
+    # ==========================================
+    ppo_path = "environment/models/pareto_real/ppo_real_a0.5_b0.5"
+    if os.path.exists(ppo_path + ".zip"):
+        env = make_eval_env(dataset, TOTAL_REQUESTS, COMMON_SEED, ALPHA, BETA)
+        ppo_model = PPO.load(ppo_path, env=env)
+        all_histories['PPO'] = run_agent_evaluation(
+            "PPO", ppo_model, env, COMMON_SEED
+        )
+    else:
+        logger.warning(f"未找到 PPO 模型 {ppo_path}.zip，跳过。")
 
-    all_histories = {
-        'Random Baseline': history_random,
-        'Greedy Best': history_best,
-        'DP Ideal': history_dp,
-        'DP Real': history_dp_real,
-        # 'PPO (DRL)': history_ppo,
-    }
+    # ==========================================
+    # 6. DQN（无 Action Mask）
+    # ==========================================
+    dqn_path = "environment/models/pareto_real/dqn_real_a0.5_b0.5_no_ac_mask"
+    if os.path.exists(dqn_path):
+        env = make_eval_env(dataset, TOTAL_REQUESTS, COMMON_SEED, ALPHA, BETA)
+        dqn_model = DQN.load(dqn_path, env=env)
+        all_histories['DQN (no mask)'] = run_agent_evaluation(
+            "DQN (no mask)", dqn_model, env, COMMON_SEED
+        )
+    else:
+        logger.warning(f"未找到 DQN 模型 {dqn_path}，跳过。")
 
+    # ==========================================
+    # 汇总输出
+    # ==========================================
     save_simulation_results(all_histories, filename="results/latest_simulation.json")
     generate_summary_report(all_histories, TOTAL_REQUESTS)
 
     logger.info("仿真结束，正在生成对比可视化报表...")
     plot_comparative_results(all_histories)
-
-    # test_rl_environment()
 
 
 if __name__ == "__main__":

@@ -41,15 +41,20 @@ class GreedyAgent:
         # ==========================================
         # 1. 遍历所有节点索引，进行剪枝与预评估
         # ==========================================
+        tasks = req.task_chain.tasks
+        sensor_id = req.task_chain.sensor_id
+        sensor = network.get_node(sensor_id)
+
         for idx, node in enumerate(self.env.edge_nodes):
             # --- 阶段 A: 物理约束剪枝 (合法性过滤) ---
-            # C2 资源约束
-            if not check_memory_constraint(node, req.task_chain, simulator):
+            # C2 资源约束：链上所有子任务均部署在同一节点，逐任务检查内存
+            if not all(
+                check_memory_constraint(node, task, req.task_chain.id, i, simulator)
+                for i, task in enumerate(tasks)
+            ):
                 continue
 
             # C4 带宽约束 (传感器 -> 边缘节点)
-            sensor_id = req.task_chain.sensor_id
-            sensor = network.get_node(sensor_id)
             if not check_bandwidth_constraint(network, sensor_id, node.id,
                                               sensor.data_size, req.task_chain.required_bandwidth):
                 continue
@@ -59,13 +64,15 @@ class GreedyAgent:
                 continue
 
             # --- 阶段 B: 试探性评估 (Look-ahead Evaluation) ---
+            # RL 单节点动作：同一节点承载链上全部子任务
+            node_list = [node] * len(tasks)
             sense, q_time, comp, res, migration = simulator.evaluate_step(
-                node, req.task_chain, req.user, req.trigger_time
+                node_list, req.task_chain, req.user, req.trigger_time
             )
 
             # --- 阶段 C: 目标函数计算 ---
             aoi = estimate_aoi(sense, q_time, comp, res)
-            cost = compute_cost(node, comp, req.task_chain, migration)
+            cost = compute_cost(node_list, req.task_chain, bool(migration))
 
             # 贪心目标：最小化瞬时成本与 AoI 的加权和
             score = alpha * cost + beta * aoi

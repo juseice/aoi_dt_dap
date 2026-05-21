@@ -1,6 +1,6 @@
 # main_pipeline.py
 import os
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO, DQN
 from environment.rl_env import DTEngineEnv
 from utils.data_generator import load_dataset
 from utils.analyzer import save_simulation_results, generate_summary_report
@@ -78,6 +78,13 @@ def main():
         agents["PPO (DRL)"] = PPO.load(ppo_model_path, env=env)
     else:
         logger.warning(f"未找到 PPO 模型 {ppo_model_path}，跳过 PPO 测试。")
+
+    # 如果有训练好的 DQN 模型，加载它
+    dqn_model_path = "environment/models/pareto_real/dqn_real_a0.5_b0.5.zip"
+    if os.path.exists(dqn_model_path):
+        agents["DQN (DRL)"] = DQN.load(dqn_model_path[:-4], env=env)
+    else:
+        logger.warning(f"未找到 DQN 模型 {dqn_model_path}，跳过 DQN 测试。")
 
     # 3. 核心流水线：遍历并评估所有算法
     all_histories = {}

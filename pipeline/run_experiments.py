@@ -4,7 +4,7 @@ import time
 import math
 import pandas as pd
 import numpy as np
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO, DQN
 from environment.rl_env import DTEngineEnv
 from utils.logger import logger
 from utils.data_generator import load_dataset
@@ -363,9 +363,25 @@ def run_baseline_comparison(dataset):
     # results.append(m_ga)
 
     # ==========================================
-    # 选手 2: Greedy
+    # 选手 2: DQN
     # ==========================================
-    logger.info("\n[2/4] 正在评估 Greedy...")
+    dqn_model_path = os.path.join(PROJECT_ROOT, "environment", "models", "pareto_real", "dqn_real_a0.5_b0.5")
+    if os.path.exists(dqn_model_path + ".zip"):
+        logger.info("\n[2/5] 正在评估 DQN (a=0.5, b=0.5)...")
+        env.alpha, env.beta = 0.5, 0.5
+        env.reset(seed=TEST_SEED)
+
+        agent_dqn = DQN.load(dqn_model_path, env=env)
+        m_dqn = evaluate_agent_full("DQN", agent_dqn, env, TEST_LOAD)
+        m_dqn['Algorithm'] = 'DQN'
+        results.append(m_dqn)
+    else:
+        logger.warning(f"找不到 DQN 模型: {dqn_model_path}.zip，跳过 DQN 评估。")
+
+    # ==========================================
+    # 选手 3: Greedy
+    # ==========================================
+    logger.info("\n[3/5] 正在评估 Greedy...")
     # 权重设为 0.01，让环境在算分时极度放大 AoI 的影响
     env.alpha, env.beta = 0.5, 0.5
     env.reset(seed=TEST_SEED)
@@ -376,7 +392,7 @@ def run_baseline_comparison(dataset):
     results.append(m_ga)
 
 
-    logger.info("\n[4/4] 正在评估 Random Baseline (性能下界)...")
+    logger.info("\n[4/5] 正在评估 Random Baseline (性能下界)...")
     env.alpha, env.beta = 0.5, 0.5  # 算分标准和 PPO 保持一致以便对比
     env.reset(seed=TEST_SEED)
 
