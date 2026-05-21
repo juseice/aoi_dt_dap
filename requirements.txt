@@ -1,0 +1,45 @@
+# ============================================================
+# AOI-DT-DAP Project Requirements
+# Python 3.10+
+#
+# 服务器 conda 环境配置步骤：
+#
+#   1. 创建环境：
+#      conda create -n aoi_dt python=3.10 -y
+#      conda activate aoi_dt
+#
+#   2. 安装 PyTorch（按服务器 CUDA 版本选择）：
+#      CUDA 11.8: conda install pytorch pytorch-cuda=11.8 -c pytorch -c nvidia -y
+#      CUDA 12.1: conda install pytorch pytorch-cuda=12.1 -c pytorch -c nvidia -y
+#      CPU only:  conda install pytorch cpuonly -c pytorch -y
+#
+#   3. 安装其余依赖：
+#      pip install -r requirements.txt
+#
+# ============================================================
+
+# RL framework
+stable-baselines3>=2.7.1
+gymnasium>=1.2.0
+
+# Numerical & data
+numpy>=2.0.0
+pandas>=2.0.0
+scipy>=1.10.0
+
+# Graph & network
+networkx>=3.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.13.0
+
+# Training utilities
+tqdm>=4.60.0
+
+# Geo-distance utilities (dataset builder only)
+geopy>=2.4.0
+
+# Interactive map (optional, utils/real_geo_map.py only)
+folium>=0.14.0
+branca>=0.6.0
